@@ -14,6 +14,40 @@ const db = () => admin.firestore();
 const USERS_COL = "users";
 const CONVERSATIONS_SUB = "conversations";
 const MATCHES_SUB = "matches";
+const PHONE_MAPPINGS_COL = "phone_mappings"; // Encrypted E.164 phone → hash reverse lookup
+
+// ─── Phone encryption (AES-256-GCM) ──────────────────────────────────────────
+//
+// PHONE_ENCRYPTION_KEY must be a 64-char hex string (32 bytes).
+// Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+
+function getEncryptionKey(): Buffer {
+  const keyHex = process.env.PHONE_ENCRYPTION_KEY;
+  if (!keyHex || keyHex.length !== 64) {
+    throw new Error("PHONE_ENCRYPTION_KEY must be a 64-char hex string (32 bytes)");
+  }
+  return Buffer.from(keyHex, "hex");
+}
+
+function encryptPhone(phone: string): string {
+  const key = getEncryptionKey();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(phone, "utf8"), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return `${iv.toString("hex")}:${authTag.toString("hex")}:${encrypted.toString("hex")}`;
+}
+
+function decryptPhone(encryptedPhone: string): string {
+  const key = getEncryptionKey();
+  const [ivHex, authTagHex, ciphertextHex] = encryptedPhone.split(":");
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(ivHex, "hex"));
+  decipher.setAuthTag(Buffer.from(authTagHex, "hex"));
+  return (
+    decipher.update(Buffer.from(ciphertextHex, "hex")).toString("utf8") +
+    decipher.final("utf8")
+  );
+}
 
 // ─── Phone hashing ────────────────────────────────────────────────────────────
 
@@ -38,13 +72,39 @@ export async function getUser(phoneHash: string): Promise<UserProfile | null> {
 }
 
 export async function getOrCreateUser(phone: string): Promise<{ profile: UserProfile; isNew: boolean }> {
-  const phoneHash = hashPhone(normalizePhone(phone));
+  const normalized = normalizePhone(phone);
+  const phoneHash = hashPhone(normalized);
   const existing = await getUser(phoneHash);
   if (existing) return { profile: existing, isNew: false };
 
   const profile = createDefaultProfile(phoneHash);
-  await db().collection(USERS_COL).doc(phoneHash).set(profile);
+
+  // Write user + encrypted phone mapping atomically
+  const batch = db().batch();
+  batch.set(db().collection(USERS_COL).doc(phoneHash), profile);
+  batch.set(
+    db().collection(PHONE_MAPPINGS_COL).doc(phoneHash),
+    { encryptedPhone: encryptPhone(normalized), createdAt: Timestamp.now() }
+  );
+  await batch.commit();
+
   return { profile, isNew: true };
+}
+
+/**
+ * Look up the E.164 phone number for a given phoneHash.
+ * Returns null if no mapping exists (pre-migration users) or decryption fails.
+ */
+export async function getPhoneByHash(phoneHash: string): Promise<string | null> {
+  const doc = await db().collection(PHONE_MAPPINGS_COL).doc(phoneHash).get();
+  if (!doc.exists) return null;
+  const data = doc.data();
+  if (!data?.encryptedPhone) return null;
+  try {
+    return decryptPhone(data.encryptedPhone);
+  } catch {
+    return null; // Wrong key or corrupted data — fail safe
+  }
 }
 
 export async function updateUser(

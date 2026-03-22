@@ -130,10 +130,11 @@ export const nightlyMatching = functions
   .onRun(async () => {
     functions.logger.info("Nightly matching job started");
 
-    const { getUsersWithoutRecentMatch, createMatchRecord, updateUser } =
+    const { getUsersWithoutRecentMatch, createMatchRecord, updateUser, getPhoneByHash } =
       await import("./services/firestore");
     const { findTopMatches } = await import("./scheduler/matchingJob");
     const { generateMatchProposal } = await import("./services/claude");
+    const { sendSms } = await import("./services/twilio");
     const { Timestamp } = await import("firebase-admin/firestore");
 
     try {
@@ -188,9 +189,21 @@ export const nightlyMatching = functions
             reasons: pair.reasons,
           });
 
-          functions.logger.info("Proposal messages generated", {
-            proposalA: proposalA.message,
-            proposalB: proposalB.message,
+          // Look up phones and deliver proposals via SMS
+          const [phoneA, phoneB] = await Promise.all([
+            getPhoneByHash(pair.userA.phoneHash),
+            getPhoneByHash(pair.userB.phoneHash),
+          ]);
+
+          await Promise.all([
+            phoneA ? sendSms(phoneA, proposalA.message) : Promise.resolve(),
+            phoneB ? sendSms(phoneB, proposalB.message) : Promise.resolve(),
+          ]);
+
+          functions.logger.info("Nightly match proposed", {
+            score: pair.score,
+            sentA: !!phoneA,
+            sentB: !!phoneB,
           });
         } catch (pairErr) {
           functions.logger.error("Error processing match pair", pairErr);
@@ -210,9 +223,10 @@ export const videoExpiryFollowUp = functions
   .runWith({ timeoutSeconds: 120, memory: "256MB" })
   .pubsub.schedule("every 5 minutes")
   .onRun(async () => {
-    const { getAllActiveUsers, getActiveMatchForUser, updateMatchStatus } =
+    const { getAllActiveUsers, getActiveMatchForUser, updateMatchStatus, getPhoneByHash } =
       await import("./services/firestore");
     const { generatePostVideoFollowUp } = await import("./services/claude");
+    const { sendSms } = await import("./services/twilio");
 
     const users = await getAllActiveUsers();
 
@@ -225,11 +239,16 @@ export const videoExpiryFollowUp = functions
         if (!expiry) continue;
         if (expiry.toMillis() > Date.now()) continue;
 
-        await generatePostVideoFollowUp(user);
+        const followUp = await generatePostVideoFollowUp(user);
         await updateMatchStatus(user.phoneHash, match.id!, "video_expired");
 
-        functions.logger.info("Video follow-up queued", { userHash: user.phoneHash });
-        // NOTE: In production, look up phone from encrypted mapping and send SMS
+        const phone = await getPhoneByHash(user.phoneHash);
+        if (phone) {
+          await sendSms(phone, followUp.message);
+          functions.logger.info("Video follow-up sent", { userHash: user.phoneHash });
+        } else {
+          functions.logger.warn("No phone mapping for video follow-up", { userHash: user.phoneHash });
+        }
       } catch (err) {
         functions.logger.error("Video expiry follow-up error", err);
       }

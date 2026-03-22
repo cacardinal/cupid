@@ -9,6 +9,7 @@ import {
   createMatchRecord,
   getActiveMatchForUser,
   getLiveWaitingUsers,
+  getPhoneByHash,
 } from "./firestore";
 import { createAnonymousRoom } from "./daily";
 import { sendSms } from "./twilio";
@@ -179,19 +180,31 @@ async function connectLivePair(
     }),
   ]);
 
-  // Send simultaneous SMS to both with the video link
-  // NOTE: In production, phone numbers are retrieved from encrypted mapping
+  // Look up E.164 phones from encrypted mapping — send simultaneous SMS
+  const [phoneA, phoneB] = await Promise.all([
+    getPhoneByHash(userA.phoneHash),
+    getPhoneByHash(userB.phoneHash),
+  ]);
+
   functions.logger.info("Live match created — sending video links", {
     roomUrl: room.url,
     expiresInMinutes: LIVE_ROOM_EXPIRY_MINUTES,
     matchIdA,
+    hasPhoneA: !!phoneA,
+    hasPhoneB: !!phoneB,
   });
 
-  // Phase 2: retrieve real phone numbers and send
-  // await Promise.all([
-  //   sendInstantMatchSms(phoneA, room.url),
-  //   sendInstantMatchSms(phoneB, room.url),
-  // ]);
+  await Promise.all([
+    phoneA ? sendInstantMatchSms(phoneA, room.url) : Promise.resolve(),
+    phoneB ? sendInstantMatchSms(phoneB, room.url) : Promise.resolve(),
+  ]);
+
+  if (!phoneA || !phoneB) {
+    functions.logger.warn("Phone mapping missing for one or both live match users", {
+      missingA: !phoneA,
+      missingB: !phoneB,
+    });
+  }
 
   return matchIdA;
 }
@@ -226,8 +239,7 @@ export async function expireLiveWaitingUsers(): Promise<number> {
     if (!user.liveStatusUntil) continue;
     if (user.liveStatusUntil.toMillis() > now) continue;
 
-    // Expired — set offline
-    // NOTE: In production, look up actual phone number from secure mapping
+    // Expired — set offline and notify
     await updateUser(user.phoneHash, {
       liveStatus: "offline" as LiveStatus,
       liveStatusUntil: undefined,
@@ -235,6 +247,15 @@ export async function expireLiveWaitingUsers(): Promise<number> {
     });
 
     functions.logger.info("Expired live-waiting user", { phoneHash: user.phoneHash });
+
+    const phone = await getPhoneByHash(user.phoneHash);
+    if (phone) {
+      await sendSms(
+        phone,
+        "Your live window closed — no compatible matches were online at the same time. It's timing, not fit. Text \"ready now\" anytime to try again 💫"
+      );
+    }
+
     expiredCount++;
   }
 
