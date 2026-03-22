@@ -1,0 +1,282 @@
+import { UserProfile } from "../models/user";
+
+// ─── Compatibility scoring ────────────────────────────────────────────────────
+
+export interface CompatibilityResult {
+  score: number;         // 0-100
+  passed: boolean;       // false = dealbreaker eliminated pair
+  reasons: string[];     // Human-readable reasons (for debugging)
+}
+
+export function computeCompatibility(
+  a: UserProfile,
+  b: UserProfile
+): CompatibilityResult {
+  const reasons: string[] = [];
+  let score = 0;
+
+  // ── Hard filters (dealbreakers eliminate the pair) ───────────────────────
+
+  // Gender preference check (bidirectional)
+  if (!genderPreferenceMatch(a, b) || !genderPreferenceMatch(b, a)) {
+    return { score: 0, passed: false, reasons: ["Gender preference mismatch"] };
+  }
+
+  // Age range check (bidirectional)
+  if (!ageRangeMatch(a, b) || !ageRangeMatch(b, a)) {
+    return { score: 0, passed: false, reasons: ["Age range mismatch"] };
+  }
+
+  // Location check
+  if (!locationMatch(a, b)) {
+    return { score: 0, passed: false, reasons: ["Location too far"] };
+  }
+
+  // Dealbreaker keyword check
+  const dbResult = dealbreakersCheck(a, b);
+  if (!dbResult.passed) {
+    return { score: 0, passed: false, reasons: dbResult.reasons };
+  }
+
+  // ── Weighted scoring ─────────────────────────────────────────────────────
+
+  // Relationship intent alignment (30 pts)
+  const intentScore = relationshipIntentScore(a, b);
+  score += intentScore * 30;
+  if (intentScore > 0.8) reasons.push("Strong relationship intent alignment");
+
+  // Shared interests (25 pts)
+  const interestScore = sharedInterestScore(a, b);
+  score += interestScore * 25;
+  if (interestScore > 0.4) reasons.push(`${Math.round(interestScore * 100)}% interest overlap`);
+
+  // Shared values (25 pts)
+  const valueScore = sharedValueScore(a, b);
+  score += valueScore * 25;
+  if (valueScore > 0.4) reasons.push(`${Math.round(valueScore * 100)}% values alignment`);
+
+  // Personality complementarity (20 pts)
+  const personalityScore = personalityComplementScore(a, b);
+  score += personalityScore * 20;
+  if (personalityScore > 0.6) reasons.push("Strong personality complementarity");
+
+  return {
+    score: Math.round(score),
+    passed: true,
+    reasons,
+  };
+}
+
+// ─── Match pair deduplication ─────────────────────────────────────────────────
+
+export interface MatchPair {
+  userA: UserProfile;
+  userB: UserProfile;
+  score: number;
+  reasons: string[];
+}
+
+export function findTopMatches(
+  users: UserProfile[],
+  minScore = 50,
+  maxMatchesPerUser = 1
+): MatchPair[] {
+  const pairs: MatchPair[] = [];
+  const matchCount: Record<string, number> = {};
+
+  // Compute all valid pairs
+  for (let i = 0; i < users.length; i++) {
+    for (let j = i + 1; j < users.length; j++) {
+      const a = users[i];
+      const b = users[j];
+
+      // Skip same user (shouldn't happen, but guard anyway)
+      if (a.phoneHash === b.phoneHash) continue;
+
+      const result = computeCompatibility(a, b);
+      if (!result.passed || result.score < minScore) continue;
+
+      pairs.push({
+        userA: a,
+        userB: b,
+        score: result.score,
+        reasons: result.reasons,
+      });
+    }
+  }
+
+  // Sort by score descending
+  pairs.sort((a, b) => b.score - a.score);
+
+  // Deduplicate: each user gets at most maxMatchesPerUser match proposals
+  const selected: MatchPair[] = [];
+  for (const pair of pairs) {
+    const aCount = matchCount[pair.userA.phoneHash] ?? 0;
+    const bCount = matchCount[pair.userB.phoneHash] ?? 0;
+
+    if (aCount < maxMatchesPerUser && bCount < maxMatchesPerUser) {
+      selected.push(pair);
+      matchCount[pair.userA.phoneHash] = aCount + 1;
+      matchCount[pair.userB.phoneHash] = bCount + 1;
+    }
+  }
+
+  return selected;
+}
+
+// ─── Scoring functions ────────────────────────────────────────────────────────
+
+function genderPreferenceMatch(seeker: UserProfile, candidate: UserProfile): boolean {
+  const prefs = seeker.preferences.genderPreference;
+  if (!prefs || prefs.length === 0) return true; // No preference = accepts all
+  const candidateGender = candidate.demographics.gender;
+  if (!candidateGender) return true; // Unknown gender passes (err toward inclusivity)
+  return prefs.includes(candidateGender);
+}
+
+function ageRangeMatch(seeker: UserProfile, candidate: UserProfile): boolean {
+  const { ageMin, ageMax } = seeker.preferences;
+  const candidateAge = candidate.demographics.age;
+  if (!candidateAge) return true; // Unknown age passes
+  if (ageMin && candidateAge < ageMin) return false;
+  if (ageMax && candidateAge > ageMax) return false;
+  return true;
+}
+
+function locationMatch(a: UserProfile, b: UserProfile): boolean {
+  // MVP: same city is sufficient. Phase 2: lat/lng + radius.
+  const cityA = a.demographics.city?.toLowerCase().trim();
+  const cityB = b.demographics.city?.toLowerCase().trim();
+  if (!cityA || !cityB) return true; // Unknown city passes
+  return cityA === cityB;
+}
+
+function dealbreakersCheck(
+  a: UserProfile,
+  b: UserProfile
+): { passed: boolean; reasons: string[] } {
+  // Simple keyword matching on dealbreaker strings
+  // Phase 2: semantic matching via embeddings
+  const dbA = (a.preferences.dealbreakers ?? []).map((d) => d.toLowerCase());
+  const dbB = (b.preferences.dealbreakers ?? []).map((d) => d.toLowerCase());
+
+  for (const db of dbA) {
+    if (matchesDealbreaker(db, b)) {
+      return { passed: false, reasons: [`User A dealbreaker: ${db}`] };
+    }
+  }
+
+  for (const db of dbB) {
+    if (matchesDealbreaker(db, a)) {
+      return { passed: false, reasons: [`User B dealbreaker: ${db}`] };
+    }
+  }
+
+  return { passed: true, reasons: [] };
+}
+
+function matchesDealbreaker(dealbreaker: string, profile: UserProfile): boolean {
+  // Check specific known dealbreaker patterns
+  const db = dealbreaker.toLowerCase();
+
+  if (db.includes("smoker") || db.includes("smoking")) {
+    return (profile.personality.personalityTraits ?? []).some((t) =>
+      t.toLowerCase().includes("smok")
+    );
+  }
+
+  if (db.includes("no kids") || db.includes("doesn't want kids")) {
+    // Dealbreaker = "I want someone who wants kids" → triggers if candidate doesn't want kids
+    return profile.personality.wantsKids === false;
+  }
+
+  if (db.includes("wants kids") || db.includes("must want kids")) {
+    return profile.personality.wantsKids === false;
+  }
+
+  // Generic: check if dealbreaker keyword appears in personality traits
+  const traits = [
+    ...(profile.personality.personalityTraits ?? []),
+    ...(profile.personality.interests ?? []),
+    ...(profile.personality.values ?? []),
+  ].join(" ").toLowerCase();
+
+  return traits.includes(db);
+}
+
+function relationshipIntentScore(a: UserProfile, b: UserProfile): number {
+  const intentA = a.preferences.relationshipIntent;
+  const intentB = b.preferences.relationshipIntent;
+
+  if (!intentA || !intentB) return 0.5; // Unknown = neutral
+
+  if (intentA === intentB) return 1.0;
+  if (intentA === "open" || intentB === "open") return 0.7;
+  if (intentA === "unsure" || intentB === "unsure") return 0.5;
+
+  // long-term vs casual = mismatch
+  if (
+    (intentA === "long-term" && intentB === "casual") ||
+    (intentA === "casual" && intentB === "long-term")
+  ) {
+    return 0.1;
+  }
+
+  return 0.5;
+}
+
+function sharedInterestScore(a: UserProfile, b: UserProfile): number {
+  return jaccardSimilarity(
+    new Set((a.personality.interests ?? []).map((s) => s.toLowerCase())),
+    new Set((b.personality.interests ?? []).map((s) => s.toLowerCase()))
+  );
+}
+
+function sharedValueScore(a: UserProfile, b: UserProfile): number {
+  return jaccardSimilarity(
+    new Set((a.personality.values ?? []).map((s) => s.toLowerCase())),
+    new Set((b.personality.values ?? []).map((s) => s.toLowerCase()))
+  );
+}
+
+function personalityComplementScore(a: UserProfile, b: UserProfile): number {
+  // Simple complementarity heuristic
+  // Phase 2: train a proper complementarity model on feedback data
+  let score = 0.5; // default neutral
+
+  // Same humor style = +0.2
+  if (
+    a.personality.humorStyle &&
+    b.personality.humorStyle &&
+    a.personality.humorStyle === b.personality.humorStyle
+  ) {
+    score += 0.2;
+  }
+
+  // Complementary communication: texter + texter is great, caller + caller is great
+  if (
+    a.personality.communicationStyle &&
+    b.personality.communicationStyle &&
+    a.personality.communicationStyle === b.personality.communicationStyle
+  ) {
+    score += 0.15;
+  }
+
+  // One introvert + one extrovert can work — reward the mix
+  const traits = [
+    ...(a.personality.personalityTraits ?? []).map((t) => t.toLowerCase()),
+    ...(b.personality.personalityTraits ?? []).map((t) => t.toLowerCase()),
+  ];
+  const hasIntrovert = traits.some((t) => t.includes("introvert"));
+  const hasExtrovert = traits.some((t) => t.includes("extrovert"));
+  if (hasIntrovert && hasExtrovert) score += 0.1;
+
+  return Math.min(score, 1.0);
+}
+
+function jaccardSimilarity(setA: Set<string>, setB: Set<string>): number {
+  if (setA.size === 0 && setB.size === 0) return 0;
+  const intersection = new Set([...setA].filter((x) => setB.has(x)));
+  const union = new Set([...setA, ...setB]);
+  return intersection.size / union.size;
+}

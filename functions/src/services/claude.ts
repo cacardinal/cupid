@@ -1,0 +1,196 @@
+import Anthropic from "@anthropic-ai/sdk";
+import { UserProfile, ConversationTurn, OnboardingStage } from "../models/user";
+import {
+  buildOnboardingSystemPrompt,
+  buildMatchProposalPrompt,
+  buildPostVideoFollowUpPrompt,
+  buildMatchDescription,
+} from "../prompts/cupid";
+
+const MODEL = "claude-sonnet-4-5";
+
+let _client: Anthropic | null = null;
+function getClient(): Anthropic {
+  if (!_client) {
+    _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  }
+  return _client;
+}
+
+export interface ClaudeResponse {
+  message: string;
+  profileUpdates: Record<string, unknown> | null;
+  rawResponse: string;
+}
+
+// ─── Core conversation turn ───────────────────────────────────────────────────
+
+export async function generateConversationReply(
+  userMessage: string,
+  history: ConversationTurn[],
+  profile: UserProfile,
+  stage: OnboardingStage
+): Promise<ClaudeResponse> {
+  const systemPrompt = buildOnboardingSystemPrompt(profile, stage);
+
+  const messages: Anthropic.MessageParam[] = [
+    ...history.map((turn) => ({
+      role: turn.role as "user" | "assistant",
+      content: turn.content,
+    })),
+    { role: "user" as const, content: userMessage },
+  ];
+
+  const response = await getClient().messages.create({
+    model: MODEL,
+    max_tokens: 512,
+    system: systemPrompt,
+    messages,
+  });
+
+  const rawText = extractText(response);
+  return parseClaudeResponse(rawText);
+}
+
+// ─── Match proposal message ───────────────────────────────────────────────────
+
+export async function generateMatchProposal(
+  userProfile: UserProfile,
+  matchProfile: UserProfile
+): Promise<ClaudeResponse> {
+  const matchDescription = buildMatchDescription(matchProfile);
+  const systemPrompt = buildMatchProposalPrompt(userProfile, matchDescription);
+
+  const response = await getClient().messages.create({
+    model: MODEL,
+    max_tokens: 256,
+    system: systemPrompt,
+    messages: [
+      {
+        role: "user",
+        content: "Generate the match proposal message.",
+      },
+    ],
+  });
+
+  return parseClaudeResponse(extractText(response));
+}
+
+// ─── Post-video follow-up ─────────────────────────────────────────────────────
+
+export async function generatePostVideoFollowUp(
+  userProfile: UserProfile
+): Promise<ClaudeResponse> {
+  const systemPrompt = buildPostVideoFollowUpPrompt(userProfile);
+
+  const response = await getClient().messages.create({
+    model: MODEL,
+    max_tokens: 256,
+    system: systemPrompt,
+    messages: [{ role: "user", content: "Generate the post-video follow-up message." }],
+  });
+
+  return parseClaudeResponse(extractText(response));
+}
+
+// ─── Intent detection ─────────────────────────────────────────────────────────
+
+export async function detectIntent(
+  message: string
+): Promise<"yes" | "no" | "ambiguous"> {
+  const response = await getClient().messages.create({
+    model: MODEL,
+    max_tokens: 16,
+    system: `You classify user intent as YES, NO, or AMBIGUOUS. Reply with exactly one word: YES, NO, or AMBIGUOUS.`,
+    messages: [
+      {
+        role: "user",
+        content: `User message: "${message}"\n\nClassify their intent regarding a yes/no question:`,
+      },
+    ],
+  });
+
+  const text = extractText(response).trim().toUpperCase();
+  if (text.includes("YES")) return "yes";
+  if (text.includes("NO")) return "no";
+  return "ambiguous";
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function extractText(response: Anthropic.Message): string {
+  return response.content
+    .filter((block): block is Anthropic.TextBlock => block.type === "text")
+    .map((block) => block.text)
+    .join("");
+}
+
+function parseClaudeResponse(rawText: string): ClaudeResponse {
+  const profileUpdateMatch = rawText.match(/<profile_update>([\s\S]*?)<\/profile_update>/);
+  let profileUpdates: Record<string, unknown> | null = null;
+  let message = rawText;
+
+  if (profileUpdateMatch) {
+    try {
+      profileUpdates = JSON.parse(profileUpdateMatch[1].trim());
+      // Remove the profile_update block from the visible message
+      message = rawText.replace(/<profile_update>[\s\S]*?<\/profile_update>/g, "").trim();
+    } catch {
+      // If parse fails, treat entire response as message
+      message = rawText;
+    }
+  }
+
+  return { message, profileUpdates, rawResponse: rawText };
+}
+
+// ─── Profile merge helper ─────────────────────────────────────────────────────
+
+export function mergeProfileUpdates(
+  profile: UserProfile,
+  updates: Record<string, unknown> | null
+): Partial<UserProfile> {
+  if (!updates) return {};
+
+  const merged: Partial<UserProfile> = {};
+
+  if (updates.demographics && typeof updates.demographics === "object") {
+    const demo = updates.demographics as Record<string, unknown>;
+    merged.demographics = { ...profile.demographics };
+    for (const [k, v] of Object.entries(demo)) {
+      if (v !== null && v !== undefined) {
+        (merged.demographics as Record<string, unknown>)[k] = v;
+      }
+    }
+  }
+
+  if (updates.preferences && typeof updates.preferences === "object") {
+    const prefs = updates.preferences as Record<string, unknown>;
+    merged.preferences = { ...profile.preferences };
+    for (const [k, v] of Object.entries(prefs)) {
+      if (v !== null && v !== undefined) {
+        (merged.preferences as Record<string, unknown>)[k] = v;
+      }
+    }
+  }
+
+  if (updates.personality && typeof updates.personality === "object") {
+    const pers = updates.personality as Record<string, unknown>;
+    merged.personality = { ...profile.personality };
+    for (const [k, v] of Object.entries(pers)) {
+      if (v !== null && v !== undefined) {
+        (merged.personality as Record<string, unknown>)[k] = v;
+      }
+    }
+  }
+
+  if (updates.onboardingStage && typeof updates.onboardingStage === "string") {
+    merged.onboardingStage = updates.onboardingStage as OnboardingStage;
+  }
+
+  if (typeof updates.onboardingComplete === "boolean") {
+    merged.onboardingComplete = updates.onboardingComplete;
+  }
+
+  return merged;
+}

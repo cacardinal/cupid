@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+functions/node_modules/
+functions/lib/
+
+# Environment
+.env
+.env.local
+*.local
+
+# Firebase
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
+firestore-debug.log
+ui-debug.log
+
+# Build
+functions/lib/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test coverage
+coverage/
+functions/coverage/

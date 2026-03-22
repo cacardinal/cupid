@@ -1,0 +1,22 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Users collection — only Cloud Functions (admin SDK) can read/write
+    // No direct client access to user data
+    match /users/{phoneHash} {
+      allow read, write: if false;
+
+      match /conversations/{turnId} {
+        allow read, write: if false;
+      }
+
+      match /matches/{matchId} {
+        allow read, write: if false;
+      }
+    }
+
+    // All access is via Cloud Functions with admin SDK
+    // This is intentional — no client-side access to PII
+  }
+}
