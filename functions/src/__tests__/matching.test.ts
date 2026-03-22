@@ -141,6 +141,27 @@ describe("computeCompatibility", () => {
     expect(result.passed).toBe(false);
   });
 
+  test("fails on dealbreaker: doesn't want kids vs wants kids", () => {
+    // Inverse: alice doesn't want kids, bob does — should also fail
+    const alice = makeUser({
+      phoneHash: "hash_a2",
+      preferences: {
+        genderPreference: ["man"],
+        relationshipIntent: "long-term",
+        dealbreakers: ["wants kids"],
+      },
+    });
+    const bob = makeUser({
+      phoneHash: "hash_b2",
+      demographics: { age: 32, gender: "man", city: "st. louis" },
+      preferences: { genderPreference: ["woman"], relationshipIntent: "long-term", dealbreakers: [] },
+      personality: { wantsKids: true },
+    });
+
+    const result = computeCompatibility(alice, bob);
+    expect(result.passed).toBe(false);
+  });
+
   test("passes when no preferences set (open to all)", () => {
     const alice = makeUser({
       phoneHash: "hash_a",

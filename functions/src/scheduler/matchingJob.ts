@@ -191,7 +191,8 @@ function matchesDealbreaker(dealbreaker: string, profile: UserProfile): boolean 
   }
 
   if (db.includes("wants kids") || db.includes("must want kids")) {
-    return profile.personality.wantsKids === false;
+    // Dealbreaker = "I don't want kids" → triggers if candidate does want kids
+    return profile.personality.wantsKids === true;
   }
 
   // Generic: check if dealbreaker keyword appears in personality traits
