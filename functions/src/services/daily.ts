@@ -1,7 +1,8 @@
 import axios from "axios";
 
 const DAILY_API_BASE = "https://api.daily.co/v1";
-const VIDEO_ROOM_DURATION_MINUTES = 20; // Room stays open 20 min (15 min call + 5 min buffer)
+const ASYNC_ROOM_DURATION_MINUTES = 20; // Async flow: 15 min call + 5 min buffer
+const LIVE_ROOM_DURATION_MINUTES = 10;  // Live flow: urgency window, no waiting
 
 export interface DailyRoom {
   id: string;
@@ -22,8 +23,16 @@ function getHeaders() {
 
 // ─── Room management ──────────────────────────────────────────────────────────
 
-export async function createAnonymousRoom(matchId: string): Promise<DailyRoom> {
-  const expiryEpoch = Math.floor(Date.now() / 1000) + VIDEO_ROOM_DURATION_MINUTES * 60;
+/**
+ * Create an anonymous Daily.co room.
+ * @param matchId    Unique match identifier (used in room name)
+ * @param durationMinutes  How long until the room expires (default: async flow)
+ */
+export async function createAnonymousRoom(
+  matchId: string,
+  durationMinutes: number = ASYNC_ROOM_DURATION_MINUTES
+): Promise<DailyRoom> {
+  const expiryEpoch = Math.floor(Date.now() / 1000) + durationMinutes * 60;
 
   const response = await axios.post(
     `${DAILY_API_BASE}/rooms`,
@@ -31,13 +40,9 @@ export async function createAnonymousRoom(matchId: string): Promise<DailyRoom> {
       name: `cupid-${matchId}-${Date.now()}`,
       properties: {
         exp: expiryEpoch,
-        // No names shown to participants
         enable_prejoin_ui: false,
-        // Disable recordings for privacy
         enable_recording: "off",
-        // Meeting tokens can enforce no-name display
-        nbf: Math.floor(Date.now() / 1000) - 60, // Valid from 1 min ago
-        // Room closes after all participants leave
+        nbf: Math.floor(Date.now() / 1000) - 60,
         autodelete_room_after_expiry: true,
       },
     },
@@ -52,6 +57,10 @@ export async function createAnonymousRoom(matchId: string): Promise<DailyRoom> {
     createdAt: Math.floor(Date.now() / 1000),
     expiresAt: expiryEpoch,
   };
+}
+
+export async function createLiveRoom(matchId: string): Promise<DailyRoom> {
+  return createAnonymousRoom(matchId, LIVE_ROOM_DURATION_MINUTES);
 }
 
 export async function deleteRoom(roomName: string): Promise<void> {

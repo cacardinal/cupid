@@ -22,12 +22,13 @@ import {
   sendDeclinedMessage,
 } from "../services/twilio";
 import { createAnonymousRoom } from "../services/daily";
+import { detectLiveIntent, detectCancelLiveIntent, detectHelpIntent } from "../services/intentDetector";
+import { setUserLive, setUserOffline } from "../services/liveMatching";
 import { UserProfile } from "../models/user";
 
 // ─── Main SMS webhook handler ─────────────────────────────────────────────────
 
 export async function handleInboundSms(req: Request, res: Response): Promise<void> {
-  // Twilio sends form-encoded body
   const from: string = req.body?.From ?? "";
   const body: string = (req.body?.Body ?? "").trim();
 
@@ -39,11 +40,46 @@ export async function handleInboundSms(req: Request, res: Response): Promise<voi
   functions.logger.info("Inbound SMS", { from: maskPhone(from), bodyLength: body.length });
 
   try {
-    // 1. Get or create user
     const { profile, isNew } = await getOrCreateUser(from);
     const phoneHash = profile.phoneHash;
 
-    // 2. Check if this message is a response to an active match proposal
+    // ── Live mode routing (onboarded users only) ──────────────────────────────
+
+    if (profile.onboardingComplete) {
+      // Cancel live session
+      if (profile.liveStatus === "waiting" && detectCancelLiveIntent(body)) {
+        await setUserOffline(phoneHash, from, "user_cancel");
+        await sendSms(from, "Got it — I've stopped the live search. I'll still be working on matches in the background!");
+        res.status(200).send("<Response/>");
+        return;
+      }
+
+      // Go live
+      if (profile.liveStatus === "offline" && detectLiveIntent(body)) {
+        await setUserLive(phoneHash, from);
+        res.status(200).send("<Response/>");
+        return;
+      }
+
+      // Already waiting — acknowledge
+      if (profile.liveStatus === "waiting" && detectLiveIntent(body)) {
+        await sendSms(from, "You're already live! I'm actively searching. I'll text you the moment I find a match 🔍");
+        res.status(200).send("<Response/>");
+        return;
+      }
+    }
+
+    // ── Help shortcut ─────────────────────────────────────────────────────────
+
+    if (detectHelpIntent(body)) {
+      const helpText = buildHelpMessage(profile.onboardingComplete);
+      await sendSms(from, helpText);
+      res.status(200).send("<Response/>");
+      return;
+    }
+
+    // ── Active match response ──────────────────────────────────────────────────
+
     const activeMatch = await getActiveMatchForUser(phoneHash);
 
     if (activeMatch && ["proposed", "mutual_interest", "video_expired"].includes(activeMatch.status)) {
@@ -52,7 +88,8 @@ export async function handleInboundSms(req: Request, res: Response): Promise<voi
       return;
     }
 
-    // 3. Regular conversation turn
+    // ── Regular conversation turn ─────────────────────────────────────────────
+
     await handleConversationTurn(from, body, profile, isNew);
     res.status(200).send("<Response/>");
   } catch (err) {
@@ -73,14 +110,12 @@ async function handleConversationTurn(
   const phoneHash = profile.phoneHash;
   const history = await getConversationHistory(phoneHash);
 
-  // Save user turn
   await appendConversationTurn(phoneHash, {
     role: "user",
     content: userMessage,
     timestamp: Timestamp.now(),
   });
 
-  // Generate Claude reply
   const result = await generateConversationReply(
     userMessage,
     history,
@@ -88,14 +123,12 @@ async function handleConversationTurn(
     profile.onboardingStage
   );
 
-  // Save assistant turn
   await appendConversationTurn(phoneHash, {
     role: "assistant",
     content: result.message,
     timestamp: Timestamp.now(),
   });
 
-  // Merge profile updates if any
   if (result.profileUpdates) {
     const profileUpdates = mergeProfileUpdates(profile, result.profileUpdates);
     if (Object.keys(profileUpdates).length > 0) {
@@ -103,8 +136,14 @@ async function handleConversationTurn(
     }
   }
 
-  // Send reply via SMS
-  await sendSms(phone, result.message);
+  // If onboarding just completed, nudge toward live mode
+  let replyText = result.message;
+  if (result.profileUpdates?.onboardingComplete && !profile.onboardingComplete) {
+    replyText +=
+      "\n\nPS: Text me \"ready now\" anytime you want to connect with someone instantly. I'll find a match in real time 🔥";
+  }
+
+  await sendSms(phone, replyText);
 }
 
 // ─── Match response handler ───────────────────────────────────────────────────
@@ -121,19 +160,16 @@ async function handleMatchResponse(
   const intent = await detectIntent(userMessage);
 
   if (matchRecord.status === "proposed") {
-    // User is responding to initial match proposal
     if (intent === "yes") {
       await updateMatchRecord(phoneHash, matchId, {
         userAccepted: true,
         status: "user_accepted",
       });
 
-      // Check if the other user has also accepted
       const otherHash = matchRecord.matchedUserId;
       const otherMatchSnap = await getOtherSideMatch(otherHash, phoneHash);
 
       if (otherMatchSnap?.userAccepted === true) {
-        // Mutual interest! Create video room.
         await createVideoRoom(phone, phoneHash, matchId, otherHash, otherMatchSnap.id!);
       } else {
         await sendSms(
@@ -148,37 +184,29 @@ async function handleMatchResponse(
         "No problem at all! I'll keep an eye out for better fits. These things take time."
       );
     } else {
-      // Ambiguous — ask again
       await sendSms(
         phone,
         "Just to be clear — are you interested in meeting this person? A simple yes or no works!"
       );
     }
   } else if (matchRecord.status === "video_expired") {
-    // User is responding to post-call follow-up (contact exchange request)
     if (intent === "yes") {
       await updateMatchRecord(phoneHash, matchId, {
         contactExchanged: true,
         status: "contact_shared",
       });
 
-      // Check if other user also wants to exchange
       const otherHash = matchRecord.matchedUserId;
       const otherMatchSnap = await getOtherSideMatch(otherHash, phoneHash);
 
       if (otherMatchSnap?.contactExchanged === true) {
-        // Both consented — share contact info (actual phone numbers)
-        // In production, we'd look up phone numbers from a secure mapping
         await sendContactExchangeMessage(
           phone,
           "your match",
           "Contact info shared via separate message"
         );
       } else {
-        await sendSms(
-          phone,
-          "Got it! Waiting to hear back from them. I'll let you know."
-        );
+        await sendSms(phone, "Got it! Waiting to hear back from them. I'll let you know.");
       }
     } else if (intent === "no") {
       await updateMatchRecord(phoneHash, matchId, { status: "contact_declined" });
@@ -199,7 +227,6 @@ async function createVideoRoom(
   const room = await createAnonymousRoom(matchId);
   const expiryTimestamp = Timestamp.fromMillis(room.expiresAt * 1000);
 
-  // Update both match records
   await updateMatchRecord(phoneHash, matchId, {
     status: "video_sent",
     videoRoomUrl: room.url,
@@ -211,21 +238,33 @@ async function createVideoRoom(
     videoRoomExpiry: expiryTimestamp,
   });
 
-  // Send video link to this user (the other will receive it from their match handler)
   await sendVideoRoomLink(phone, room.url, "your match");
 }
 
-// In a real implementation we'd look this up from the match record
 async function getOtherSideMatch(
   otherHash: string,
   thisHash: string
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<any | null> {
-  const { getActiveMatchForUser } = await import("../services/firestore");
   const match = await getActiveMatchForUser(otherHash);
   if (!match) return null;
   if (match.matchedUserId !== thisHash) return null;
   return match;
+}
+
+function buildHelpMessage(onboarded: boolean): string {
+  if (!onboarded) {
+    return "I'm Cupid, your AI matchmaker 💘 Just keep chatting — I'll ask you everything I need to find you a great match. There's nothing to configure.";
+  }
+  return (
+    "Here's what I can do:\n\n" +
+    "• Text me anytime to chat and update your preferences\n" +
+    '• Text "ready now" to go live — I\'ll find someone compatible in real time ⚡\n' +
+    '• Text "cancel" while live to stop the search\n' +
+    "• Reply yes/no to match proposals\n" +
+    "• After a video call, reply yes/no to exchange contact info\n\n" +
+    "I work best when you're honest with me 💛"
+  );
 }
 
 function maskPhone(phone: string): string {

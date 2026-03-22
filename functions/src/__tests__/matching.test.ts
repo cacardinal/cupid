@@ -19,6 +19,7 @@ function makeUser(overrides: Partial<UserProfile> = {}): UserProfile {
     totalMatches: 0,
     creditsRemaining: 3,
     testUser: false,
+    liveStatus: "offline",
     demographics: {
       age: 30,
       gender: "woman",

@@ -16,6 +16,7 @@ function makeProfile(overrides: Partial<UserProfile> = {}): UserProfile {
     demographics: {},
     preferences: {},
     personality: {},
+    liveStatus: "offline",
     ...overrides,
   };
 }

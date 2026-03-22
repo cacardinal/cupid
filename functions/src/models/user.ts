@@ -6,6 +6,9 @@ export type RelationshipIntent = "long-term" | "casual" | "open" | "unsure";
 export type HumorStyle = "dry" | "sarcastic" | "silly" | "witty" | "deadpan" | "none";
 export type CommunicationStyle = "texter" | "caller" | "in-person" | "mixed";
 
+// Live mode — user is actively available for an instant connection right now
+export type LiveStatus = "offline" | "waiting" | "connecting" | "in_call";
+
 export interface Demographics {
   age?: number;
   gender?: Gender;
@@ -51,6 +54,11 @@ export interface UserProfile {
   totalMatches: number;
   creditsRemaining: number;    // Intro credits purchased
   testUser: boolean;           // Seed users for beta
+
+  // Live mode fields
+  liveStatus: LiveStatus;
+  liveStatusUntil?: Timestamp; // When "waiting" expires (default: +30 min)
+  liveSessionId?: string;      // Tracks the current live session to prevent double-connects
 }
 
 export type OnboardingStage =
@@ -89,15 +97,19 @@ export interface MatchRecord {
 }
 
 export type MatchStatus =
-  | "proposed"        // Cupid reached out, awaiting user response
-  | "user_accepted"   // This user said yes, waiting for other
-  | "user_declined"   // This user said no
-  | "mutual_interest" // Both said yes, video room created
-  | "video_sent"      // Video link sent to both
-  | "video_expired"   // Room expired, follow-up sent
-  | "contact_shared"  // Both consented to share contact info
-  | "contact_declined"// One or both declined contact exchange
-  | "feedback_given"; // Post-match feedback received
+  // Async flow (nightly batch)
+  | "proposed"         // Cupid reached out, awaiting user response
+  | "user_accepted"    // This user said yes, waiting for other
+  | "user_declined"    // This user said no
+  // Live flow (instant connect)
+  | "live_connecting"  // Both were live, room created, links sent simultaneously
+  // Shared post-video states
+  | "mutual_interest"  // Both said yes (async) or both joined (live)
+  | "video_sent"       // Video link sent to both
+  | "video_expired"    // Room expired, follow-up sent
+  | "contact_shared"   // Both consented to share contact info
+  | "contact_declined" // One or both declined contact exchange
+  | "feedback_given";  // Post-match feedback received
 
 export function createDefaultProfile(phoneHash: string): UserProfile {
   const now = Timestamp.now();
@@ -112,7 +124,8 @@ export function createDefaultProfile(phoneHash: string): UserProfile {
     personality: {},
     active: true,
     totalMatches: 0,
-    creditsRemaining: 1, // One free intro for new users
+    creditsRemaining: 1,
     testUser: false,
+    liveStatus: "offline",
   };
 }

@@ -16,6 +16,7 @@ function baseProfile(): UserProfile {
     demographics: {},
     preferences: {},
     personality: {},
+    liveStatus: "offline",
   };
 }
 

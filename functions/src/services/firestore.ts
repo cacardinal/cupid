@@ -15,7 +15,7 @@ const USERS_COL = "users";
 const CONVERSATIONS_SUB = "conversations";
 const MATCHES_SUB = "matches";
 
-// ─── Phone hashing ───────────────────────────────────────────────────────────
+// ─── Phone hashing ────────────────────────────────────────────────────────────
 
 export function hashPhone(e164Phone: string): string {
   return crypto.createHash("sha256").update(e164Phone.trim()).digest("hex");
@@ -51,11 +51,15 @@ export async function updateUser(
   phoneHash: string,
   updates: Partial<UserProfile>
 ): Promise<void> {
+  // Strip explicit `undefined` values — Firestore rejects them
+  const sanitized = Object.fromEntries(
+    Object.entries(updates).filter(([, v]) => v !== undefined)
+  );
   await db()
     .collection(USERS_COL)
     .doc(phoneHash)
     .update({
-      ...updates,
+      ...sanitized,
       updatedAt: Timestamp.now(),
     });
 }
@@ -69,7 +73,7 @@ export async function getAllActiveUsers(): Promise<UserProfile[]> {
   return snap.docs.map((d) => d.data() as UserProfile);
 }
 
-// ─── Conversation history ─────────────────────────────────────────────────────
+// ─── Conversation history ──────────────────────────────────────────────────────
 
 export async function appendConversationTurn(
   phoneHash: string,
@@ -145,6 +149,7 @@ export async function getActiveMatchForUser(phoneHash: string): Promise<MatchRec
       "mutual_interest",
       "video_sent",
       "video_expired",
+      "live_connecting",
     ])
     .orderBy("proposedAt", "desc")
     .limit(1)
@@ -175,12 +180,55 @@ export async function updateMatchStatus(
   await updateMatchRecord(phoneHash, matchId, { status });
 }
 
+// ─── Live mode queries ────────────────────────────────────────────────────────
+
+/**
+ * Get all users in "waiting" liveStatus within a given city,
+ * excluding the requesting user and anyone whose window has expired.
+ * Requires composite index: (liveStatus, active, onboardingComplete)
+ */
+export async function getLiveWaitingUsers(
+  city: string,
+  excludePhoneHash: string
+): Promise<UserProfile[]> {
+  const now = Timestamp.now();
+
+  const snap = await db()
+    .collection(USERS_COL)
+    .where("liveStatus", "==", "waiting")
+    .where("active", "==", true)
+    .where("onboardingComplete", "==", true)
+    .get();
+
+  return snap.docs
+    .map((d) => d.data() as UserProfile)
+    .filter((u) => {
+      if (u.phoneHash === excludePhoneHash) return false;
+      // Same city (case-insensitive)
+      const uCity = u.demographics.city?.toLowerCase().trim();
+      if (!uCity || uCity !== city) return false;
+      // Not expired
+      if (u.liveStatusUntil && u.liveStatusUntil.toMillis() < now.toMillis()) return false;
+      return true;
+    });
+}
+
+/**
+ * Get ALL users currently in "waiting" liveStatus (used for expiry sweep)
+ */
+export async function getAllLiveWaitingUsers(): Promise<UserProfile[]> {
+  const snap = await db()
+    .collection(USERS_COL)
+    .where("liveStatus", "==", "waiting")
+    .get();
+  return snap.docs.map((d) => d.data() as UserProfile);
+}
+
 // ─── Batch helpers ────────────────────────────────────────────────────────────
 
 export async function getUsersWithoutRecentMatch(
   cooldownHours = 24
 ): Promise<UserProfile[]> {
-  const cutoff = Timestamp.fromMillis(Date.now() - cooldownHours * 60 * 60 * 1000);
   const allActive = await getAllActiveUsers();
 
   return allActive.filter((u) => {
