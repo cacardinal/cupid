@@ -10,6 +10,7 @@ functions/lib/
 
 # Firebase
 .firebase/
+.firebaserc
 firebase-debug.log
 firebase-debug.*.log
 firestore-debug.log

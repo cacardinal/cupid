@@ -49,13 +49,6 @@
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "proposedAt", "order": "DESCENDING" }
       ]
-    },
-    {
-      "collectionGroup": "conversations",
-      "queryScope": "COLLECTION_GROUP",
-      "fields": [
-        { "fieldPath": "timestamp", "order": "ASCENDING" }
-      ]
     }
   ],
   "fieldOverrides": []
