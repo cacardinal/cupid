@@ -61,8 +61,7 @@ export async function transcribeFromUrl(audioUrl: string): Promise<TranscriptRes
 }
 
 /**
- * Transcribe raw audio bytes (e.g. OGG from Telegram voice message).
- * Matches the pattern used in Life-OS Telegram bot.
+ * Transcribe raw audio bytes (e.g. OGG from a Telegram voice message).
  */
 export async function transcribeBuffer(
   audioBuffer: Buffer,
