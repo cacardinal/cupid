@@ -17,6 +17,8 @@ function baseProfile(): UserProfile {
     preferences: {},
     personality: {},
     liveStatus: "offline",
+    referralCode: "CUP-AAAAAA",
+    referralCount: 0,
   };
 }
 

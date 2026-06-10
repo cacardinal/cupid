@@ -17,6 +17,8 @@ function makeProfile(overrides: Partial<UserProfile> = {}): UserProfile {
     preferences: {},
     personality: {},
     liveStatus: "offline",
+    referralCode: "CUP-AAAAAA",
+    referralCount: 0,
     ...overrides,
   };
 }

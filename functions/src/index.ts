@@ -152,6 +152,28 @@ export const videoExpiryFollowUp = functions
     await runVideoExpiryFollowUp();
   });
 
+// ─── Scheduled: Proactive status messages ────────────────────────────────────
+//
+// Sends thin-market and still-searching updates to waiting users daily.
+
+export const proactiveStatusUpdates = functions
+  .runWith({ timeoutSeconds: 300, memory: "512MB" })
+  .pubsub.schedule("every day 10:00")
+  .timeZone("America/Chicago")
+  .onRun(async () => {
+    const { sendThinMarketUpdates, sendStillSearchingUpdates } = await import(
+      "./scheduler/statusUpdates"
+    );
+    const [thin, still] = await Promise.all([
+      sendThinMarketUpdates(),
+      sendStillSearchingUpdates(),
+    ]);
+    functions.logger.info("Proactive status updates sent", {
+      thinMarket: thin,
+      stillSearching: still,
+    });
+  });
+
 // ─── Demo admin endpoint (local emulator only) ──────────────────────────────
 //
 // Lets the local demo harness trigger scheduled jobs on demand.

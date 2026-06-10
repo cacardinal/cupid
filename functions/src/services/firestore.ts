@@ -320,3 +320,20 @@ export async function getUsersWithoutRecentMatch(
     return u.matchCooldownUntil.toMillis() < Date.now();
   });
 }
+
+/**
+ * Look up a user by their referral code ("CUP-XXXXXX").
+ * Referral codes are deterministic (generateReferralCode(phoneHash)), so this
+ * is a simple equality query.
+ */
+export async function getUserByReferralCode(
+  referralCode: string
+): Promise<UserProfile | null> {
+  const snap = await db()
+    .collection(USERS_COL)
+    .where("referralCode", "==", referralCode)
+    .limit(1)
+    .get();
+  if (snap.empty) return null;
+  return snap.docs[0].data() as UserProfile;
+}

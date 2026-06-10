@@ -17,7 +17,7 @@
 
   <header class="nav">
     <div class="nav-brand">💘 Cupid</div>
-    <a class="nav-cta" href="#waitlist">Join the waitlist</a>
+    <a class="nav-cta" href="#text-to-join">Text to join</a>
   </header>
 
   <!-- ── Hero ─────────────────────────────────────────── -->
@@ -31,7 +31,7 @@
         numbers only when you both say yes.
       </p>
       <div class="hero-ctas">
-        <a class="btn primary" href="#waitlist">Get early access</a>
+        <a class="btn primary" id="hero-text-btn" href="sms:+1XXXXXXXXXX?body=Hi%20Cupid!">Text Cupid now ↗</a>
         <a class="btn ghost" href="#how">How it works</a>
       </div>
       <p class="hero-trust">Launching in St. Louis · SMS-native · nothing to install</p>
@@ -156,12 +156,40 @@
     <p class="pricing-note">Every introduction is one Cupid actually believes in — if it can't find someone compatible, it doesn't charge you for filler.</p>
   </section>
 
-  <!-- ── Waitlist ────────────────────────────────────── -->
-  <section class="waitlist" id="waitlist">
-    <h2>Be first in line</h2>
-    <p>Launching with a closed beta in St. Louis. Tell us where you are and we'll text you when Cupid is ready.</p>
-    <a class="btn primary big" href="mailto:hello@cupid.example?subject=Waitlist&body=City%3A%20">Join the waitlist</a>
+  <!-- ── Text to Join ──────────────────────────────── -->
+  <section class="waitlist" id="text-to-join">
+    <h2>Ready? Just text.</h2>
+    <p class="waitlist-sub">No app. No account. No profile to fill out. Just send your first message and Cupid takes it from there.</p>
+
+    <div class="text-join-block">
+      <!-- Mobile: tap to open SMS app -->
+      <a class="btn primary big sms-link" href="sms:+1XXXXXXXXXX?body=Hi%20Cupid!">
+        📱 Text Cupid on mobile
+      </a>
+
+      <!-- Desktop: show number + copy button -->
+      <div class="number-display">
+        <span class="cupid-number" id="cupid-number-display">+1 (XXX) XXX-XXXX</span>
+        <button class="copy-btn" onclick="copyNumber()">Copy</button>
+      </div>
+      <p class="number-hint">On desktop? Copy the number and text it from your phone.</p>
+    </div>
+
+    <div class="referral-hint">
+      <p>Got a referral code from a friend? Just include it in your first message — you'll both get a bonus intro.</p>
+    </div>
   </section>
+
+  <script>
+    function copyNumber() {
+      var n = document.getElementById('cupid-number-display').textContent.trim();
+      navigator.clipboard.writeText(n).then(function() {
+        var btn = document.querySelector('.copy-btn');
+        btn.textContent = 'Copied!';
+        setTimeout(function() { btn.textContent = 'Copy'; }, 2000);
+      });
+    }
+  </script>
 
   <footer class="footer">
     <span>💘 Cupid · AI-first matchmaking</span>

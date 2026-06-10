@@ -25,6 +25,7 @@ import { createAnonymousRoom } from "../services/daily";
 import { detectLiveIntent, detectCancelLiveIntent, detectHelpIntent } from "../services/intentDetector";
 import { setUserLive, setUserOffline } from "../services/liveMatching";
 import { UserProfile } from "../models/user";
+import { extractReferralCode, processReferral, buildShareMessage } from "../services/referral";
 
 // ─── Main SMS webhook handler ─────────────────────────────────────────────────
 
@@ -40,8 +41,28 @@ export async function handleInboundSms(req: Request, res: Response): Promise<voi
   functions.logger.info("Inbound SMS", { from: maskPhone(from), bodyLength: body.length });
 
   try {
-    const { profile, isNew } = await getOrCreateUser(from);
+    const { profile: rawProfile, isNew } = await getOrCreateUser(from);
+    let profile = rawProfile;
     const phoneHash = profile.phoneHash;
+
+    // ── Referral detection (new users only) ──────────────────────────────────
+
+    if (isNew) {
+      const code = extractReferralCode(body);
+      if (code) {
+        const referrerHash = await processReferral(phoneHash, code);
+        if (referrerHash) {
+          // Award the new user a bonus credit and record who referred them
+          await updateUser(phoneHash, {
+            creditsRemaining: (profile.creditsRemaining ?? 1) + 1,
+            referredBy: code,
+          });
+          // Refresh profile so downstream sees the updated credits
+          profile = { ...profile, creditsRemaining: (profile.creditsRemaining ?? 1) + 1, referredBy: code };
+          functions.logger.info("Referral applied", { newUser: phoneHash.slice(0, 8), referrer: referrerHash.slice(0, 8) });
+        }
+      }
+    }
 
     // ── Live mode routing (onboarded users only) ──────────────────────────────
 
@@ -142,14 +163,25 @@ async function handleConversationTurn(
     }
   }
 
-  // If onboarding just completed, nudge toward live mode
+  // If onboarding just completed, nudge toward live mode + send share invite
+  const justCompleted = result.profileUpdates?.onboardingComplete && !profile.onboardingComplete;
   let replyText = result.message;
-  if (result.profileUpdates?.onboardingComplete && !profile.onboardingComplete) {
+  if (justCompleted) {
     replyText +=
       "\n\nPS: Text me \"ready now\" anytime you want to connect with someone instantly. I'll find a match in real time 🔥";
   }
 
   await sendSms(phone, replyText);
+
+  // Follow-up: share message (separate SMS so it reads as a beat after the greeting)
+  if (justCompleted) {
+    const cupidNumber = process.env.TWILIO_PHONE_NUMBER ?? "";
+    if (cupidNumber) {
+      await new Promise((r) => setTimeout(r, 2500));
+      const shareMsg = buildShareMessage(profile.referralCode, cupidNumber);
+      await sendSms(phone, shareMsg);
+    }
+  }
 }
 
 // ─── Match response handler ───────────────────────────────────────────────────

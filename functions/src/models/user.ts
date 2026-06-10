@@ -59,6 +59,11 @@ export interface UserProfile {
   liveStatus: LiveStatus;
   liveStatusUntil?: Timestamp; // When "waiting" expires (default: +30 min)
   liveSessionId?: string;      // Tracks the current live session to prevent double-connects
+
+  // Referral fields
+  referralCode: string;        // "CUP-" + first 6 chars of phoneHash (uppercase)
+  referredBy?: string;         // referralCode of the person who referred this user
+  referralCount: number;       // How many users this person has successfully referred
 }
 
 export type OnboardingStage =
@@ -111,6 +116,10 @@ export type MatchStatus =
   | "contact_declined" // One or both declined contact exchange
   | "feedback_given";  // Post-match feedback received
 
+export function generateReferralCode(phoneHash: string): string {
+  return "CUP-" + phoneHash.slice(0, 6).toUpperCase();
+}
+
 export function createDefaultProfile(phoneHash: string): UserProfile {
   const now = Timestamp.now();
   return {
@@ -127,5 +136,7 @@ export function createDefaultProfile(phoneHash: string): UserProfile {
     creditsRemaining: 1,
     testUser: false,
     liveStatus: "offline",
+    referralCode: generateReferralCode(phoneHash),
+    referralCount: 0,
   };
 }

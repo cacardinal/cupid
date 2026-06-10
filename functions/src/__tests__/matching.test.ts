@@ -20,6 +20,8 @@ function makeUser(overrides: Partial<UserProfile> = {}): UserProfile {
     creditsRemaining: 3,
     testUser: false,
     liveStatus: "offline",
+    referralCode: "CUP-AAAAAA",
+    referralCount: 0,
     demographics: {
       age: 30,
       gender: "woman",
