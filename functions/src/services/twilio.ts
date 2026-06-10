@@ -23,6 +23,18 @@ const CUPID_NUMBER = () => {
 // ─── SMS ──────────────────────────────────────────────────────────────────────
 
 export async function sendSms(to: string, body: string): Promise<string> {
+  // Demo mode: write to Firestore outbox instead of hitting Twilio.
+  // Lets the local demo harness render outbound messages as chat bubbles.
+  if (process.env.DEMO_MODE === "true") {
+    const { getFirestore, Timestamp } = await import("firebase-admin/firestore");
+    const ref = await getFirestore().collection("demo_outbox").add({
+      to,
+      body,
+      sentAt: Timestamp.now(),
+    });
+    return `demo-${ref.id}`;
+  }
+
   // Enforce SMS length — split if > 1600 chars
   const chunks = splitMessage(body);
   let lastSid = "";

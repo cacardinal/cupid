@@ -94,7 +94,13 @@ export async function handleInboundSms(req: Request, res: Response): Promise<voi
     res.status(200).send("<Response/>");
   } catch (err) {
     functions.logger.error("SMS handler error", err);
-    await sendSms(from, "Something went sideways on my end. Try again in a moment?");
+    try {
+      await sendSms(from, "Something went sideways on my end. Try again in a moment?");
+    } catch (smsErr) {
+      // If the fallback SMS itself fails (e.g. Twilio auth), still return
+      // 200/TwiML so Twilio doesn't retry-storm the webhook.
+      functions.logger.error("Fallback SMS also failed", smsErr);
+    }
     res.status(200).send("<Response/>");
   }
 }
@@ -238,7 +244,14 @@ async function createVideoRoom(
     videoRoomExpiry: expiryTimestamp,
   });
 
-  await sendVideoRoomLink(phone, room.url, "your match");
+  // Send the link to BOTH sides simultaneously — the other user accepted
+  // earlier and is waiting to hear back.
+  const { getPhoneByHash } = await import("../services/firestore");
+  const otherPhone = await getPhoneByHash(otherHash);
+  await Promise.all([
+    sendVideoRoomLink(phone, room.url, "your match"),
+    otherPhone ? sendVideoRoomLink(otherPhone, room.url, "your match") : Promise.resolve(),
+  ]);
 }
 
 async function getOtherSideMatch(
@@ -246,10 +259,10 @@ async function getOtherSideMatch(
   thisHash: string
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<any | null> {
-  const match = await getActiveMatchForUser(otherHash);
-  if (!match) return null;
-  if (match.matchedUserId !== thisHash) return null;
-  return match;
+  // Status-independent lookup: the other side may have already advanced to a
+  // terminal status (contact_shared), which getActiveMatchForUser filters out.
+  const { getMatchBetween } = await import("../services/firestore");
+  return getMatchBetween(otherHash, thisHash);
 }
 
 function buildHelpMessage(onboarded: boolean): string {

@@ -220,6 +220,30 @@ export async function getActiveMatchForUser(phoneHash: string): Promise<MatchRec
   return { id: doc.id, ...doc.data() } as MatchRecord;
 }
 
+/**
+ * Most recent match record between two specific users, regardless of status.
+ * Used when resolving the OTHER side of a match — status-filtered lookups
+ * deadlock once one side has advanced to a terminal status (e.g.
+ * contact_shared) before the other side replies.
+ */
+export async function getMatchBetween(
+  phoneHash: string,
+  otherHash: string
+): Promise<MatchRecord | null> {
+  const snap = await db()
+    .collection(USERS_COL)
+    .doc(phoneHash)
+    .collection(MATCHES_SUB)
+    .where("matchedUserId", "==", otherHash)
+    .orderBy("proposedAt", "desc")
+    .limit(1)
+    .get();
+
+  if (snap.empty) return null;
+  const doc = snap.docs[0];
+  return { id: doc.id, ...doc.data() } as MatchRecord;
+}
+
 export async function getPendingMatchProposalsForUser(
   phoneHash: string
 ): Promise<MatchRecord[]> {

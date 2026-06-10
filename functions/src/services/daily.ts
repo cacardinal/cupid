@@ -34,6 +34,18 @@ export async function createAnonymousRoom(
 ): Promise<DailyRoom> {
   const expiryEpoch = Math.floor(Date.now() / 1000) + durationMinutes * 60;
 
+  // Demo mode: return a fake room pointing at the local demo harness's
+  // mock video page instead of creating a real Daily.co room.
+  if (process.env.DEMO_MODE === "true") {
+    return {
+      id: `demo-${matchId}`,
+      name: `cupid-demo-${matchId}`,
+      url: `http://localhost:5180/video/${matchId}`,
+      createdAt: Math.floor(Date.now() / 1000),
+      expiresAt: expiryEpoch,
+    };
+  }
+
   const response = await axios.post(
     `${DAILY_API_BASE}/rooms`,
     {

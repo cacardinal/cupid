@@ -19,6 +19,10 @@
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
   },
+  "hosting": {
+    "public": "website",
+    "ignore": ["firebase.json", "**/.*"]
+  },
   "emulators": {
     "functions": {
       "port": 5001

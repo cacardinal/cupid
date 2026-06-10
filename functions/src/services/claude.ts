@@ -98,21 +98,27 @@ export async function generatePostVideoFollowUp(
 export async function detectIntent(
   message: string
 ): Promise<"yes" | "no" | "ambiguous"> {
+  // Fast path: obvious yes/no answers resolve via keyword patterns —
+  // no API latency and no risk of the model over-hedging on a bare "yes".
+  const { detectYesNoIntent } = await import("./intentDetector");
+  const keywordIntent = detectYesNoIntent(message);
+  if (keywordIntent !== "ambiguous") return keywordIntent;
+
   const response = await getClient().messages.create({
     model: MODEL,
     max_tokens: 16,
-    system: `You classify user intent as YES, NO, or AMBIGUOUS. Reply with exactly one word: YES, NO, or AMBIGUOUS.`,
+    system: `The user was just asked whether they want to meet a potential match. Classify their reply as YES (they want to proceed), NO (they decline), or AMBIGUOUS (genuinely unclear). Enthusiasm, agreement, or interest counts as YES. Reply with exactly one word: YES, NO, or AMBIGUOUS.`,
     messages: [
       {
         role: "user",
-        content: `User message: "${message}"\n\nClassify their intent regarding a yes/no question:`,
+        content: `Their reply: "${message}"`,
       },
     ],
   });
 
   const text = extractText(response).trim().toUpperCase();
   if (text.includes("YES")) return "yes";
-  if (text.includes("NO")) return "no";
+  if (text.startsWith("NO")) return "no";
   return "ambiguous";
 }
 
@@ -128,18 +134,22 @@ function extractText(response: Anthropic.Message): string {
 function parseClaudeResponse(rawText: string): ClaudeResponse {
   const profileUpdateMatch = rawText.match(/<profile_update>([\s\S]*?)<\/profile_update>/);
   let profileUpdates: Record<string, unknown> | null = null;
-  let message = rawText;
 
   if (profileUpdateMatch) {
     try {
       profileUpdates = JSON.parse(profileUpdateMatch[1].trim());
-      // Remove the profile_update block from the visible message
-      message = rawText.replace(/<profile_update>[\s\S]*?<\/profile_update>/g, "").trim();
     } catch {
-      // If parse fails, treat entire response as message
-      message = rawText;
+      profileUpdates = null;
     }
   }
+
+  // Strip profile_update blocks from the visible message — including an
+  // UNTERMINATED block (max_tokens truncation can cut off the closing tag,
+  // which would otherwise leak raw JSON into the user's SMS).
+  const message = rawText
+    .replace(/<profile_update>[\s\S]*?<\/profile_update>/g, "")
+    .replace(/<profile_update>[\s\S]*$/, "")
+    .trim();
 
   return { message, profileUpdates, rawResponse: rawText };
 }
