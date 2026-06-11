@@ -192,3 +192,27 @@ h2 { font-size: 2rem; margin-bottom: 0.6rem; }
   border: 1px dashed var(--border); border-radius: 0.5rem;
   font-size: 0.9rem; color: var(--muted); max-width: 480px; text-align: center;
 }
+
+/* ── Waitlist collector ──────────────────────────────── */
+.waitlist-form-block {
+  margin: 3.5rem auto 0; max-width: 460px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 16px; padding: 1.8rem;
+}
+.waitlist-form-block h3 { margin-bottom: 0.4rem; }
+.waitlist-form-sub { color: var(--muted); font-size: 0.9rem; margin-bottom: 1.2rem; }
+#waitlist-form { display: flex; flex-direction: column; gap: 0.7rem; }
+#waitlist-form input {
+  background: #0e0f15; border: 1px solid var(--border); color: var(--text);
+  border-radius: 10px; padding: 0.75rem 1rem; font-size: 1rem; outline: none;
+}
+#waitlist-form input:focus { border-color: var(--accent); }
+#waitlist-form button {
+  background: var(--accent); color: #fff; border: none; border-radius: 10px;
+  padding: 0.8rem; font-size: 1rem; font-weight: 700; cursor: pointer;
+}
+#waitlist-form button:disabled { opacity: 0.6; }
+.wl-status { min-height: 1.2em; font-size: 0.88rem; margin-top: 0.6rem; }
+.wl-status.success { color: var(--green); }
+.wl-status.error { color: #ff8080; }
+.wl-privacy { color: var(--muted); font-size: 0.75rem; margin-top: 0.5rem; }

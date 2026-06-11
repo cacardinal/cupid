@@ -30,8 +30,29 @@ import { extractReferralCode, processReferral, buildShareMessage } from "../serv
 // ─── Main SMS webhook handler ─────────────────────────────────────────────────
 
 export async function handleInboundSms(req: Request, res: Response): Promise<void> {
+  // Security gate: reject forged webhooks before reading anything else.
+  const { verifyTwilioRequest, sanitizeInboundBody, hasMedia, MEDIA_DECLINED_MESSAGE } =
+    await import("../services/inboundSecurity");
+
+  if (!verifyTwilioRequest(req)) {
+    res.status(403).send("Forbidden");
+    return;
+  }
+
   const from: string = req.body?.From ?? "";
-  const body: string = (req.body?.Body ?? "").trim();
+  const body: string = sanitizeInboundBody(req.body?.Body ?? "");
+
+  // MMS: never fetch user-supplied media; decline politely (text-only product).
+  if (from && hasMedia(req.body)) {
+    functions.logger.info("Inbound MMS declined", { from: maskPhone(from) });
+    try {
+      await sendSms(from, MEDIA_DECLINED_MESSAGE);
+    } catch (e) {
+      functions.logger.error("MMS decline reply failed", e);
+    }
+    res.status(200).send("<Response/>");
+    return;
+  }
 
   if (!from || !body) {
     res.status(400).send("Missing From or Body");

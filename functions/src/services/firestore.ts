@@ -29,7 +29,7 @@ function getEncryptionKey(): Buffer {
   return Buffer.from(keyHex, "hex");
 }
 
-function encryptPhone(phone: string): string {
+export function encryptPhone(phone: string): string {
   const key = getEncryptionKey();
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);

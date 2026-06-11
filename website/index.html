@@ -6,12 +6,17 @@
   <title>Cupid — No swiping. No profiles. Just a conversation.</title>
   <meta name="description" content="Cupid is an AI matchmaker you text. It learns you through conversation, finds someone compatible, and sets up an anonymous video date — no apps, no swiping, no profiles." />
   <link rel="stylesheet" href="style.css" />
-  <!-- www → apex redirect (works regardless of DNS/CDN config) -->
+  <!-- Canonical domain: textcupid.app. Redirect heycupid.app + www variants
+       (works regardless of DNS/CDN config; Firebase-level redirect is set too) -->
   <script>
-    if (window.location.hostname === 'www.heycupid.app') {
-      window.location.replace('https://heycupid.app' + window.location.pathname + window.location.search + window.location.hash);
-    }
+    (function () {
+      var h = window.location.hostname;
+      if (h === 'heycupid.app' || h === 'www.heycupid.app' || h === 'www.textcupid.app') {
+        window.location.replace('https://textcupid.app' + window.location.pathname + window.location.search + window.location.hash);
+      }
+    })();
   </script>
+  <link rel="canonical" href="https://textcupid.app/" />
 </head>
 <body>
 
@@ -178,9 +183,63 @@
     <div class="referral-hint">
       <p>Got a referral code from a friend? Just include it in your first message — you'll both get a bonus intro.</p>
     </div>
+
+    <!-- Waitlist collector: phone goes to Firestore (hashed + encrypted) -->
+    <div class="waitlist-form-block" id="waitlist">
+      <h3>Not in St. Louis yet? Join the waitlist.</h3>
+      <p class="waitlist-form-sub">Drop your number and Cupid will text you the moment it reaches your city.</p>
+      <form id="waitlist-form" novalidate>
+        <input type="tel" id="wl-phone" inputmode="tel" autocomplete="tel" placeholder="(314) 555-0123" required />
+        <input type="text" id="wl-city" placeholder="Your city (optional)" />
+        <button type="submit" id="wl-submit">Save my spot</button>
+      </form>
+      <p class="wl-status" id="wl-status" role="status"></p>
+      <p class="wl-privacy">Your number is stored encrypted and only used for the launch text. No spam, ever.</p>
+    </div>
   </section>
 
   <script>
+    var WAITLIST_ENDPOINT = 'https://us-central1-cupid-dating-mvp.cloudfunctions.net/waitlistSignup';
+
+    document.getElementById('waitlist-form').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      var status = document.getElementById('wl-status');
+      var btn = document.getElementById('wl-submit');
+      var phone = document.getElementById('wl-phone').value;
+      var city = document.getElementById('wl-city').value;
+
+      var digits = phone.replace(/\D/g, '');
+      if (digits.length < 10) {
+        status.textContent = 'That doesn’t look like a full US number.';
+        status.className = 'wl-status error';
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+      try {
+        var res = await fetch(WAITLIST_ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: phone, city: city }),
+        });
+        var data = await res.json();
+        if (data.ok) {
+          status.textContent = '✅ You’re on the list. Cupid will text you at launch.';
+          status.className = 'wl-status success';
+          document.getElementById('waitlist-form').reset();
+        } else {
+          status.textContent = data.error || 'Something went wrong — try again?';
+          status.className = 'wl-status error';
+        }
+      } catch (err) {
+        status.textContent = 'Network hiccup — try again in a moment.';
+        status.className = 'wl-status error';
+      }
+      btn.disabled = false;
+      btn.textContent = 'Save my spot';
+    });
+
     function copyNumber() {
       var n = document.getElementById('cupid-number-display').textContent.trim();
       navigator.clipboard.writeText(n).then(function() {

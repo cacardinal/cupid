@@ -214,3 +214,43 @@ export const demoAdmin = functions
       res.status(500).json({ error: String(err) });
     }
   });
+
+// ─── Waitlist signup (website form) ──────────────────────────────────────────
+
+const WAITLIST_ALLOWED_ORIGINS = new Set([
+  "https://textcupid.app",
+  "https://heycupid.app",
+  "https://cupid-dating-mvp.web.app",
+  "http://localhost:5190",
+  "http://localhost:5180",
+]);
+
+export const waitlistSignup = functions
+  .runWith({ timeoutSeconds: 15, memory: "256MB" })
+  .https.onRequest(async (req, res) => {
+    const origin = req.header("Origin") ?? "";
+    if (WAITLIST_ALLOWED_ORIGINS.has(origin)) {
+      res.set("Access-Control-Allow-Origin", origin);
+      res.set("Vary", "Origin");
+    }
+    res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type");
+
+    if (req.method === "OPTIONS") {
+      res.status(204).send("");
+      return;
+    }
+    if (req.method !== "POST") {
+      res.status(405).json({ ok: false, error: "Method Not Allowed" });
+      return;
+    }
+
+    const { addToWaitlist } = await import("./services/waitlist");
+    const phone = String(req.body?.phone ?? "");
+    const city = req.body?.city ? String(req.body.city) : undefined;
+    const ip =
+      (req.header("x-forwarded-for") ?? "").split(",")[0].trim() || req.ip || "unknown";
+
+    const result = await addToWaitlist(phone, ip, city);
+    res.status(result.ok ? 200 : 400).json(result);
+  });
