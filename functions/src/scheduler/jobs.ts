@@ -14,17 +14,146 @@ export interface MatchingRunSummary {
   }>;
 }
 
+// Instant matching uses a higher confidence bar than the nightly sweep: a
+// real-time intro should only fire when we're genuinely sure, not just when a
+// pair clears the batch minimum.
+export const INSTANT_MATCH_MIN_SCORE = 70;
+
+import type { MatchPair } from "./matchingJob";
+
+/**
+ * Create the reciprocal match records, set cooldowns, generate both proposals,
+ * and text both users. Shared by the nightly sweep and instant matching.
+ * Returns the proposed-pair summary entry, or null if anything failed.
+ */
+export async function proposeMatchPair(
+  pair: MatchPair
+): Promise<{ userA: string; userB: string; score: number; reasons: string[] } | null> {
+  const { createMatchRecord, updateUser, getPhoneByHash } = await import("../services/firestore");
+  const { generateMatchProposal } = await import("../services/claude");
+  const { sendSms } = await import("../services/twilio");
+  const { Timestamp } = await import("firebase-admin/firestore");
+
+  try {
+    const [proposalA, proposalB] = await Promise.all([
+      generateMatchProposal(pair.userA, pair.userB),
+      generateMatchProposal(pair.userB, pair.userA),
+    ]);
+
+    const now = Timestamp.now();
+    const cooldown = Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000);
+
+    const [matchIdA, matchIdB] = await Promise.all([
+      createMatchRecord({
+        userId: pair.userA.phoneHash,
+        matchedUserId: pair.userB.phoneHash,
+        status: "proposed",
+        compatibilityScore: pair.score,
+        proposedAt: now,
+        updatedAt: now,
+      }),
+      createMatchRecord({
+        userId: pair.userB.phoneHash,
+        matchedUserId: pair.userA.phoneHash,
+        status: "proposed",
+        compatibilityScore: pair.score,
+        proposedAt: now,
+        updatedAt: now,
+      }),
+    ]);
+
+    await Promise.all([
+      updateUser(pair.userA.phoneHash, { matchCooldownUntil: cooldown }),
+      updateUser(pair.userB.phoneHash, { matchCooldownUntil: cooldown }),
+    ]);
+
+    void track("match_proposed", pair.userA.phoneHash, { matchId: matchIdA, score: pair.score });
+    void track("match_proposed", pair.userB.phoneHash, { matchId: matchIdB, score: pair.score });
+
+    const [phoneA, phoneB] = await Promise.all([
+      getPhoneByHash(pair.userA.phoneHash),
+      getPhoneByHash(pair.userB.phoneHash),
+    ]);
+
+    await Promise.all([
+      phoneA ? sendSms(phoneA, proposalA.message) : Promise.resolve(),
+      phoneB ? sendSms(phoneB, proposalB.message) : Promise.resolve(),
+    ]);
+
+    functions.logger.info("Match proposed", { score: pair.score, matchIdA, matchIdB });
+    return {
+      userA: pair.userA.phoneHash,
+      userB: pair.userB.phoneHash,
+      score: pair.score,
+      reasons: pair.reasons,
+    };
+  } catch (err) {
+    functions.logger.error("proposeMatchPair failed", err);
+    return null;
+  }
+}
+
+export interface InstantMatchResult {
+  matched: boolean;
+  score?: number;
+  matchedWith?: string;
+  reason?: string;
+}
+
+/**
+ * Try to introduce a single user RIGHT NOW (e.g. just after they finish
+ * onboarding) instead of waiting for the nightly sweep. Finds this user's best
+ * available partner; only proposes if the pair clears INSTANT_MATCH_MIN_SCORE.
+ * Because it texts both sides, a user who has been waiting also gets introduced
+ * the moment a strong new candidate completes onboarding.
+ *
+ * Note: the candidate-busy check is a read, not a transaction, so two
+ * simultaneous completions could both pick the same third user (worst case: an
+ * extra proposal). The 24h cooldown set on proposal limits the blast radius;
+ * a Firestore transaction is the proper fix when volume warrants it.
+ */
+export async function attemptInstantMatch(phoneHash: string): Promise<InstantMatchResult> {
+  const { getUser, getUsersWithoutRecentMatch, getActiveMatchForUser } = await import(
+    "../services/firestore"
+  );
+  const { computeCompatibility } = await import("./matchingJob");
+
+  const me = await getUser(phoneHash);
+  if (!me || !me.onboardingComplete) return { matched: false, reason: "not_ready" };
+  if (me.matchCooldownUntil && me.matchCooldownUntil.toMillis() > Date.now()) {
+    return { matched: false, reason: "cooldown" };
+  }
+  if (await getActiveMatchForUser(phoneHash)) return { matched: false, reason: "active_match" };
+
+  const pool = (await getUsersWithoutRecentMatch(24)).filter((u) => u.phoneHash !== phoneHash);
+  let best: MatchPair | null = null;
+  for (const cand of pool) {
+    const r = computeCompatibility(me, cand);
+    if (!r.passed || r.score < INSTANT_MATCH_MIN_SCORE) continue;
+    if (!best || r.score > best.score) {
+      best = { userA: me, userB: cand, score: r.score, reasons: r.reasons };
+    }
+  }
+  if (!best) return { matched: false, reason: "no_candidate" };
+
+  // Narrow the race window: skip if the chosen candidate just got matched.
+  if (await getActiveMatchForUser(best.userB.phoneHash)) {
+    return { matched: false, reason: "candidate_busy" };
+  }
+
+  const result = await proposeMatchPair(best);
+  return result
+    ? { matched: true, score: best.score, matchedWith: best.userB.phoneHash }
+    : { matched: false, reason: "propose_failed" };
+}
+
 /**
  * Core nightly matching logic — shared by the scheduled `nightlyMatching`
  * function and the demo-only `demoAdmin?action=runMatching` endpoint.
  */
 export async function runNightlyMatching(): Promise<MatchingRunSummary> {
-  const { getUsersWithoutRecentMatch, createMatchRecord, updateUser, getPhoneByHash } =
-    await import("../services/firestore");
+  const { getUsersWithoutRecentMatch } = await import("../services/firestore");
   const { findTopMatches } = await import("./matchingJob");
-  const { generateMatchProposal } = await import("../services/claude");
-  const { sendSms } = await import("../services/twilio");
-  const { Timestamp } = await import("firebase-admin/firestore");
 
   const users = await getUsersWithoutRecentMatch(24);
   functions.logger.info(`Found ${users.length} eligible users for matching`);
@@ -39,73 +168,10 @@ export async function runNightlyMatching(): Promise<MatchingRunSummary> {
   };
 
   for (const pair of pairs) {
-    try {
-      const [proposalA, proposalB] = await Promise.all([
-        generateMatchProposal(pair.userA, pair.userB),
-        generateMatchProposal(pair.userB, pair.userA),
-      ]);
-
-      const now = Timestamp.now();
-      const cooldown = Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000);
-
-      const [matchIdA, matchIdB] = await Promise.all([
-        createMatchRecord({
-          userId: pair.userA.phoneHash,
-          matchedUserId: pair.userB.phoneHash,
-          status: "proposed",
-          compatibilityScore: pair.score,
-          proposedAt: now,
-          updatedAt: now,
-        }),
-        createMatchRecord({
-          userId: pair.userB.phoneHash,
-          matchedUserId: pair.userA.phoneHash,
-          status: "proposed",
-          compatibilityScore: pair.score,
-          proposedAt: now,
-          updatedAt: now,
-        }),
-      ]);
-
-      await Promise.all([
-        updateUser(pair.userA.phoneHash, { matchCooldownUntil: cooldown }),
-        updateUser(pair.userB.phoneHash, { matchCooldownUntil: cooldown }),
-      ]);
-
-      void track("match_proposed", pair.userA.phoneHash, { matchId: matchIdA, score: pair.score }); // analytics
-      void track("match_proposed", pair.userB.phoneHash, { matchId: matchIdB, score: pair.score }); // analytics
-      functions.logger.info("Nightly match created", {
-        score: pair.score,
-        matchIdA,
-        matchIdB,
-        reasons: pair.reasons,
-      });
-
-      const [phoneA, phoneB] = await Promise.all([
-        getPhoneByHash(pair.userA.phoneHash),
-        getPhoneByHash(pair.userB.phoneHash),
-      ]);
-
-      await Promise.all([
-        phoneA ? sendSms(phoneA, proposalA.message) : Promise.resolve(),
-        phoneB ? sendSms(phoneB, proposalB.message) : Promise.resolve(),
-      ]);
-
-      functions.logger.info("Nightly match proposed", {
-        score: pair.score,
-        sentA: !!phoneA,
-        sentB: !!phoneB,
-      });
-
+    const entry = await proposeMatchPair(pair);
+    if (entry) {
       summary.pairsCreated++;
-      summary.pairs.push({
-        userA: pair.userA.phoneHash,
-        userB: pair.userB.phoneHash,
-        score: pair.score,
-        reasons: pair.reasons,
-      });
-    } catch (pairErr) {
-      functions.logger.error("Error processing match pair", pairErr);
+      summary.pairs.push(entry);
     }
   }
 

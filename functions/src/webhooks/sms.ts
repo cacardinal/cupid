@@ -264,6 +264,19 @@ async function handleConversationTurn(
       await sendSms(phone, shareMsg);
     }
   }
+
+  // ── Instant matching (fire-and-forget) ────────────────────────────────────────
+  // The moment a profile is complete, try to introduce them now instead of
+  // waiting for the nightly sweep. Only fires a real intro on a high-confidence
+  // pair; texts both sides, so a waiting user also gets matched when a strong
+  // new candidate finishes onboarding. Never blocks the conversation.
+  if (justCompleted) {
+    void import("../scheduler/jobs")
+      .then(({ attemptInstantMatch }) => attemptInstantMatch(phoneHash))
+      .then((r) => functions.logger.info("Instant match attempt", r))
+      .catch((err) => functions.logger.error("Instant match dispatch failed", err));
+  }
+  // ── End instant matching ──────────────────────────────────────────────────────
 }
 
 // ─── Match response handler ───────────────────────────────────────────────────
