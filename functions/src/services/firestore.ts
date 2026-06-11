@@ -206,6 +206,8 @@ export async function getActiveMatchForUser(phoneHash: string): Promise<MatchRec
     .where("status", "in", [
       "proposed",
       "user_accepted",
+      "scheduling",
+      "scheduled",
       "mutual_interest",
       "video_sent",
       "video_expired",

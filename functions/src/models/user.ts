@@ -49,6 +49,8 @@ export interface UserProfile {
   personality: Personality;
   active: boolean;
   matchCooldownUntil?: Timestamp;
+  lastCheckinAt?: Timestamp;   // friend-mode: last proactive check-in
+  checkinCount?: number;       // friend-mode: total check-ins sent
   quietHoursStart?: number;    // 0-23, hour in user's timezone
   quietHoursEnd?: number;
   totalMatches: number;
@@ -99,6 +101,11 @@ export interface MatchRecord {
   feedbackGiven?: boolean;
   feedbackScore?: number;      // 1-5 post-call rating
   feedbackNotes?: string;
+  // Scheduled-date flow
+  proposedSlots?: Timestamp[];   // candidate times Cupid offered
+  scheduledAt?: Timestamp;       // locked-in date time
+  slotPickedBy?: string;         // phoneHash of the user who picked first
+  reminderSent?: boolean;        // T-15min reminder delivered
 }
 
 export type MatchStatus =
@@ -106,6 +113,9 @@ export type MatchStatus =
   | "proposed"         // Cupid reached out, awaiting user response
   | "user_accepted"    // This user said yes, waiting for other
   | "user_declined"    // This user said no
+  // Scheduled-date flow (mutual interest -> coordinated time)
+  | "scheduling"       // Both accepted; Cupid proposing time slots
+  | "scheduled"        // Date time locked in; room opens at scheduledAt
   // Live flow (instant connect)
   | "live_connecting"  // Both were live, room created, links sent simultaneously
   // Shared post-video states

@@ -76,6 +76,36 @@ export async function generateMatchProposal(
   return parseClaudeResponse(extractText(response));
 }
 
+
+// ─── Friend-mode check-in ─────────────────────────────────────────────────────
+
+export async function generateFriendCheckin(
+  userProfile: UserProfile,
+  history: ConversationTurn[]
+): Promise<ClaudeResponse> {
+  const { buildFriendCheckinPrompt } = await import("../prompts/cupid");
+  const systemPrompt = buildFriendCheckinPrompt(userProfile);
+
+  const recent = history
+    .slice(-8)
+    .map((t) => `${t.role}: ${t.content}`)
+    .join("\n");
+
+  const response = await getClient().messages.create({
+    model: MODEL,
+    max_tokens: 200,
+    system: systemPrompt,
+    messages: [
+      {
+        role: "user",
+        content: `Recent conversation:\n${recent}\n\nWrite the check-in message now.`,
+      },
+    ],
+  });
+
+  return parseClaudeResponse(extractText(response));
+}
+
 // ─── Post-video follow-up ─────────────────────────────────────────────────────
 
 export async function generatePostVideoFollowUp(

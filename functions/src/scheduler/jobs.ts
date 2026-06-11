@@ -158,3 +158,81 @@ export async function runVideoExpiryFollowUp(force = false): Promise<VideoExpiry
 
   return summary;
 }
+
+export interface ScheduledDatesSummary {
+  remindersSent: number;
+  roomsOpened: number;
+}
+
+/**
+ * Scheduled-date runner (every 5 min): sends the T-15min reminder, then opens
+ * the Daily room at the scheduled time and sends both users the link.
+ * @param force  Treat all scheduled dates as due now (demo use only).
+ */
+export async function runScheduledDates(force = false): Promise<ScheduledDatesSummary> {
+  const { getAllActiveUsers, getActiveMatchForUser, updateMatchRecord, getPhoneByHash, getMatchBetween } =
+    await import("../services/firestore");
+  const { createAnonymousRoom } = await import("../services/daily");
+  const { sendSms, sendVideoRoomLink } = await import("../services/twilio");
+  const { Timestamp } = await import("firebase-admin/firestore");
+  const { formatSlotCT } = await import("../services/scheduling");
+
+  const users = await getAllActiveUsers();
+  const summary: ScheduledDatesSummary = { remindersSent: 0, roomsOpened: 0 };
+  const now = Date.now();
+
+  for (const user of users) {
+    try {
+      const match = await getActiveMatchForUser(user.phoneHash);
+      if (!match || match.status !== "scheduled" || !match.scheduledAt) continue;
+
+      const startMs = match.scheduledAt.toMillis();
+      const other = await getMatchBetween(match.matchedUserId, user.phoneHash);
+      if (!other) continue;
+
+      // T-15 reminder (once, sent by whichever side is processed first)
+      if (!force && !match.reminderSent && now >= startMs - 15 * 60_000 && now < startMs) {
+        const [pA, pB] = await Promise.all([
+          getPhoneByHash(user.phoneHash),
+          getPhoneByHash(match.matchedUserId),
+        ]);
+        const msg = `15 minutes until your Cupid date (${formatSlotCT(new Date(startMs))}). Find somewhere quiet — link coming right on time 💘`;
+        await Promise.all([
+          pA ? sendSms(pA, msg) : null,
+          pB ? sendSms(pB, msg) : null,
+          updateMatchRecord(user.phoneHash, match.id!, { reminderSent: true }),
+          updateMatchRecord(match.matchedUserId, other.id!, { reminderSent: true }),
+        ]);
+        summary.remindersSent++;
+        continue;
+      }
+
+      // Date time arrived → open the room
+      if (force || now >= startMs) {
+        const room = await createAnonymousRoom(match.id!);
+        const expiry = Timestamp.fromMillis(room.expiresAt * 1000);
+        await Promise.all([
+          updateMatchRecord(user.phoneHash, match.id!, {
+            status: "video_sent", videoRoomUrl: room.url, videoRoomExpiry: expiry,
+          }),
+          updateMatchRecord(match.matchedUserId, other.id!, {
+            status: "video_sent", videoRoomUrl: room.url, videoRoomExpiry: expiry,
+          }),
+        ]);
+        const [pA, pB] = await Promise.all([
+          getPhoneByHash(user.phoneHash),
+          getPhoneByHash(match.matchedUserId),
+        ]);
+        await Promise.all([
+          pA ? sendVideoRoomLink(pA, room.url, "your match") : null,
+          pB ? sendVideoRoomLink(pB, room.url, "your match") : null,
+        ]);
+        summary.roomsOpened++;
+        functions.logger.info("Scheduled date room opened", { matchId: match.id });
+      }
+    } catch (err) {
+      functions.logger.error("Scheduled date runner error", err);
+    }
+  }
+  return summary;
+}

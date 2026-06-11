@@ -124,7 +124,7 @@ export async function handleInboundSms(req: Request, res: Response): Promise<voi
 
     const activeMatch = await getActiveMatchForUser(phoneHash);
 
-    if (activeMatch && ["proposed", "mutual_interest", "video_expired"].includes(activeMatch.status)) {
+    if (activeMatch && ["proposed", "mutual_interest", "video_expired", "scheduling"].includes(activeMatch.status)) {
       await handleMatchResponse(from, body, profile, activeMatch.id!, activeMatch);
       res.status(200).send("<Response/>");
       return;
@@ -216,6 +216,12 @@ async function handleMatchResponse(
   matchRecord: any
 ): Promise<void> {
   const phoneHash = profile.phoneHash;
+
+  if (matchRecord.status === "scheduling") {
+    await handleSchedulingReply(phone, userMessage, phoneHash, matchId, matchRecord);
+    return;
+  }
+
   const intent = await detectIntent(userMessage);
 
   if (matchRecord.status === "proposed") {
@@ -229,7 +235,7 @@ async function handleMatchResponse(
       const otherMatchSnap = await getOtherSideMatch(otherHash, phoneHash);
 
       if (otherMatchSnap?.userAccepted === true) {
-        await createVideoRoom(phone, phoneHash, matchId, otherHash, otherMatchSnap.id!);
+        await startScheduling(phone, phoneHash, matchId, otherHash, otherMatchSnap.id!);
       } else {
         await sendSms(
           phone,
@@ -276,6 +282,117 @@ async function handleMatchResponse(
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Both accepted: propose evening time slots to both users (status -> scheduling). */
+async function startScheduling(
+  phone: string,
+  phoneHash: string,
+  matchId: string,
+  otherHash: string,
+  otherMatchId: string
+): Promise<void> {
+  const { proposeSlots, slotsMessage, toTimestamp } = await import("../services/scheduling");
+  const slots = proposeSlots();
+  const slotTs = slots.map(toTimestamp);
+
+  await Promise.all([
+    updateMatchRecord(phoneHash, matchId, { status: "scheduling", proposedSlots: slotTs }),
+    updateMatchRecord(otherHash, otherMatchId, { status: "scheduling", proposedSlots: slotTs }),
+  ]);
+
+  const { getPhoneByHash } = await import("../services/firestore");
+  const otherPhone = await getPhoneByHash(otherHash);
+  const msg = slotsMessage(slots);
+  await Promise.all([
+    sendSms(phone, msg),
+    otherPhone ? sendSms(otherPhone, msg) : Promise.resolve(),
+  ]);
+}
+
+/** Handle a reply while the pair is picking a time. */
+async function handleSchedulingReply(
+  phone: string,
+  userMessage: string,
+  phoneHash: string,
+  matchId: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  matchRecord: any
+): Promise<void> {
+  const { parseSlotReply, proposeSlots, slotsMessage, toTimestamp, formatSlotCT, scheduledConfirmationMessage } =
+    await import("../services/scheduling");
+  const { getPhoneByHash, getMatchBetween } = await import("../services/firestore");
+  const { detectYesNoIntent } = await import("../services/intentDetector");
+
+  const otherHash = matchRecord.matchedUserId;
+  const other = await getMatchBetween(otherHash, phoneHash);
+  const otherPhone = await getPhoneByHash(otherHash);
+
+  // Someone already suggested a time and THIS user is confirming it
+  if (matchRecord.slotPickedBy && matchRecord.slotPickedBy !== phoneHash && matchRecord.scheduledAt) {
+    const yn = detectYesNoIntent(userMessage);
+    if (yn === "yes") {
+      await Promise.all([
+        updateMatchRecord(phoneHash, matchId, { status: "scheduled" }),
+        other ? updateMatchRecord(otherHash, other.id!, { status: "scheduled" }) : null,
+      ]);
+      const when = matchRecord.scheduledAt.toDate();
+      await Promise.all([
+        sendSms(phone, scheduledConfirmationMessage(when, matchId, phoneHash)),
+        otherPhone && other
+          ? sendSms(otherPhone, scheduledConfirmationMessage(when, other.id!, otherHash))
+          : Promise.resolve(),
+      ]);
+      return;
+    }
+    if (yn === "no") {
+      // Decliner picks instead: fresh slots to both, decliner is now the picker
+      const slots = proposeSlots();
+      const slotTs = slots.map(toTimestamp);
+      await Promise.all([
+        updateMatchRecord(phoneHash, matchId, { proposedSlots: slotTs, slotPickedBy: "" }),
+        other ? updateMatchRecord(otherHash, other.id!, { proposedSlots: slotTs, slotPickedBy: "" }) : null,
+      ]);
+      await sendSms(phone, "No problem — pick one that works for you:\n\n" + slotsMessage(slots));
+      if (otherPhone) await sendSms(otherPhone, "That time didn't work for them — finding another. Hang tight!");
+      return;
+    }
+    await sendSms(phone, `Does ${formatSlotCT(matchRecord.scheduledAt.toDate())} work for you? A simple yes or no does it.`);
+    return;
+  }
+
+  // This user is picking from the proposed slots
+  const slots: Date[] = (matchRecord.proposedSlots ?? []).map((t: { toDate: () => Date }) => t.toDate());
+  const choice = parseSlotReply(userMessage, slots.length || 3);
+
+  if (choice === "none") {
+    const fresh = proposeSlots(new Date(Date.now() + 86_400_000));
+    const slotTs = fresh.map(toTimestamp);
+    await Promise.all([
+      updateMatchRecord(phoneHash, matchId, { proposedSlots: slotTs }),
+      other ? updateMatchRecord(otherHash, other.id!, { proposedSlots: slotTs }) : null,
+    ]);
+    await sendSms(phone, "All good — how about these instead?\n\n" + slotsMessage(fresh));
+    return;
+  }
+
+  if (choice === null || !slots[choice]) {
+    await sendSms(phone, "Just reply 1, 2, or 3 to pick a time — or \"none\" if they don't work.");
+    return;
+  }
+
+  const picked = slots[choice];
+  const pickedTs = toTimestamp(picked);
+  await Promise.all([
+    updateMatchRecord(phoneHash, matchId, { scheduledAt: pickedTs, slotPickedBy: phoneHash }),
+    other ? updateMatchRecord(otherHash, other.id!, { scheduledAt: pickedTs, slotPickedBy: phoneHash }) : null,
+  ]);
+  await sendSms(phone, `${formatSlotCT(picked)} — nice choice. Checking with your match now 🤞`);
+  if (otherPhone) {
+    await sendSms(otherPhone, `Your match suggested ${formatSlotCT(picked)} for your video date. Does that work? (yes/no)`);
+  }
+}
+
+// (legacy instant-room helper retained for the live flow path)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function createVideoRoom(
   phone: string,
   phoneHash: string,

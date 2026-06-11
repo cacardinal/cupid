@@ -218,6 +218,20 @@ export const demoAdmin = functions
         return;
       }
 
+      if (action === "startScheduledDates") {
+        const { runScheduledDates } = await import("./scheduler/jobs");
+        const summary = await runScheduledDates(true);
+        res.status(200).json({ ok: true, action, summary });
+        return;
+      }
+
+      if (action === "runCheckins") {
+        const { runFriendCheckins } = await import("./scheduler/friendCheckins");
+        const sent = await runFriendCheckins();
+        res.status(200).json({ ok: true, action, summary: { sent } });
+        return;
+      }
+
       res.status(400).json({ error: `Unknown action: ${action}` });
     } catch (err) {
       functions.logger.error("demoAdmin error", { action, err });
@@ -270,4 +284,72 @@ export const waitlistSignup = functions
 
     const result = await addToWaitlist(phone, ip, city);
     res.status(result.ok ? 200 : 400).json(result);
+  });
+
+// ─── Scheduled: date-runner (reminders + room opening) ──────────────────────
+
+export const scheduledDateRunner = functions
+  .runWith({ timeoutSeconds: 300, memory: "512MB", secrets: ALL_SECRETS })
+  .pubsub.schedule("every 5 minutes")
+  .onRun(async () => {
+    const { runScheduledDates } = await import("./scheduler/jobs");
+    const summary = await runScheduledDates();
+    if (summary.remindersSent || summary.roomsOpened) {
+      functions.logger.info("Scheduled dates processed", summary);
+    }
+  });
+
+// ─── Scheduled: friend-mode check-ins (daily 6pm CT) ────────────────────────
+
+export const friendCheckins = functions
+  .runWith({ timeoutSeconds: 540, memory: "512MB", secrets: ALL_SECRETS })
+  .pubsub.schedule("every day 18:00")
+  .timeZone("America/Chicago")
+  .onRun(async () => {
+    const { runFriendCheckins } = await import("./scheduler/friendCheckins");
+    const sent = await runFriendCheckins();
+    functions.logger.info("Friend check-ins complete", { sent });
+  });
+
+// ─── Calendar invite (ICS download for scheduled dates) ─────────────────────
+
+export const calendarInvite = functions
+  .runWith({ timeoutSeconds: 15, memory: "256MB", secrets: ["PHONE_ENCRYPTION_KEY"] })
+  .https.onRequest(async (req, res) => {
+    const matchId = String(req.query.match ?? "");
+    const userPrefix = String(req.query.u ?? "");
+    if (!/^[A-Za-z0-9]{6,40}$/.test(matchId) || !/^[a-f0-9]{8,64}$/.test(userPrefix)) {
+      res.status(400).send("Bad request");
+      return;
+    }
+    try {
+      const adminFs = await import("firebase-admin/firestore");
+      const db = adminFs.getFirestore();
+      const userSnap = await db
+        .collection("users")
+        .where(adminFs.FieldPath.documentId(), ">=", userPrefix)
+        .where(adminFs.FieldPath.documentId(), "<", userPrefix + "\uf8ff")
+        .limit(1)
+        .get();
+      if (userSnap.empty) {
+        res.status(404).send("Not found");
+        return;
+      }
+      const matchSnap = await db
+        .collection("users").doc(userSnap.docs[0].id)
+        .collection("matches").doc(matchId).get();
+      const m = matchSnap.data();
+      if (!m?.scheduledAt) {
+        res.status(404).send("Not found");
+        return;
+      }
+      const { buildIcs } = await import("./services/scheduling");
+      const ics = buildIcs(matchId, m.scheduledAt.toDate(), m.videoRoomUrl);
+      res.set("Content-Type", "text/calendar; charset=utf-8");
+      res.set("Content-Disposition", "attachment; filename=cupid-date.ics");
+      res.status(200).send(ics);
+    } catch (err) {
+      functions.logger.error("calendarInvite error", err);
+      res.status(500).send("Error");
+    }
   });

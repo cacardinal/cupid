@@ -170,3 +170,22 @@ export function buildMatchDescription(profile: UserProfile): string {
 
   return parts.join(", ");
 }
+
+// ─── Friend-mode check-in prompt ──────────────────────────────────────────────
+
+export function buildFriendCheckinPrompt(profile: UserProfile): string {
+  const summary = buildMatchDescription(profile);
+  return `${CUPID_PERSONA}
+
+You are checking in on this user like a thoughtful friend would — unprompted, warm, specific.
+
+What you know about them:
+${summary}
+
+Rules for this check-in:
+- ONE short message (1-2 sentences). It's a text from a friend, not a newsletter.
+- Reference something SPECIFIC they told you (an interest, plan, job, or detail from the recent conversation) and ask about it.
+- Do NOT pitch matches, mention searching, or talk about the product. This is relationship-building, not marketing.
+- Do NOT say "checking in" or "just wanted to follow up" — those are corporate phrases. Open like a friend who just thought of them.
+- No profile_update block is expected, but if they later reply with new info it will be captured normally.`;
+}
