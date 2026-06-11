@@ -49,7 +49,7 @@ for (let i = 0; i < COUNT; i++) {
     behavior: {
       msgLen: pick({ short: 0.4, medium: 0.45, long: 0.15 }),
       lowercase: rnd() < 0.45, typoRate: +(rnd() * 0.08).toFixed(3), emojiRate: +(rnd() * 0.5).toFixed(2),
-      latencyMinVirtual: [5, 20, 60, 240][Math.floor(rnd() * 4)],
+      latencyMinVirtual: [5, 15, 30, 90][Math.floor(rnd() * 4)],
       dropoutHazard: +(0.01 + rnd() * 0.05).toFixed(3),
       agreeableness: +(0.3 + rnd() * 0.6).toFixed(2),
       guardedness: +(rnd()).toFixed(2),
@@ -123,6 +123,6 @@ async function flavor() {
 
 if (!args["no-flavor"]) await flavor();
 for (const p of personas) { p.name ??= "Alex"; p.backstory ??= ""; p.sampleText ??= "hey"; }
-const out = path.join(DIR, `personas-${COUNT}.jsonl`);
+const out = args.out ? (path.isAbsolute(args.out) ? args.out : path.join(DIR, args.out)) : path.join(DIR, `personas-${COUNT}.jsonl`);
 fs.writeFileSync(out, personas.map((p) => JSON.stringify(p)).join("\n"));
 console.log(`wrote ${out}`);

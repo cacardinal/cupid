@@ -8,6 +8,10 @@ const WAVE=args.wave??"1", JUDGE=+(args.judge??10);
 const FS=`http://127.0.0.1:8080/v1/projects/cupid-dating-mvp/databases/(default)/documents`;
 const BRIDGE=process.env.BRIDGE_URL??"http://127.0.0.1:5599";
 const H={Authorization:"Bearer owner"};
+// Integrity check: the engine stamped the exact persona path it ran with.
+// Refuse to score against a different file (wave-2 corruption guard).
+const stamp=path.join(DIR,"state",`wave-${WAVE}-personas.txt`);
+if(fs.existsSync(stamp)){const ran=fs.readFileSync(stamp,"utf8").trim();if(path.resolve(args.personas)!==ran){console.error(`FATAL: --personas (${path.resolve(args.personas)}) != file the engine ran (${ran}). Extraction metrics would be garbage. Aborting.`);process.exit(1);}}
 const personas=fs.readFileSync(args.personas).toString().trim().split("\n").map(JSON.parse);
 const dec=(f)=>{const o={};for(const[k,v]of Object.entries(f??{})){o[k]=v.stringValue??(v.integerValue&&+v.integerValue)??v.booleanValue??(v.arrayValue?(v.arrayValue.values??[]).map(x=>x.stringValue):v.mapValue?dec(v.mapValue.fields):null);}return o;};
 const sha=async(t)=>[...new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(t)))].map(b=>b.toString(16).padStart(2,"0")).join("");

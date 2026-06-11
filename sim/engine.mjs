@@ -15,6 +15,10 @@ const CKPT=path.join(DIR,"state",`wave-${WAVE}.json`);
 let s=SEED>>>0; const rnd=()=>((s=(s*1664525+1013904223)>>>0)/2**32);
 const pfile=args.personas??path.join(DIR,"personas",`personas-${USERS}.jsonl`);
 const personas=fs.readFileSync(pfile,"utf8").trim().split("\n").map(JSON.parse).slice(0,USERS);
+// Ground-truth integrity guard: phones are index-based, so the file the analyzer
+// reads later MUST be this exact file. Stamp the path so analyze.mjs can verify.
+if(personas[0]?.phone!==`+1314${String(6000000).padStart(7,"0")}`){console.error("FATAL: persona file phone scheme mismatch, refusing to run");process.exit(1);}
+fs.writeFileSync(path.join(DIR,"state",`wave-${WAVE}-personas.txt`),path.resolve(pfile));
 
 // Launch curve: 50% arrive day 1-2 (exp decay), rest spread, referral bumps ignored v1
 for (const p of personas) {
