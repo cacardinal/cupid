@@ -58,13 +58,15 @@ async function conversationHistory(p){
 async function tick(ev){
   const p=ev.p;
   if(p.state.dropped) return;
-  if(!ev.first && rnd()<p.behavior.dropoutHazard){ p.state.dropped=true; return; }
   try{
     const hist=await conversationHistory(p);
     if(!ev.first && hist.length && hist[hist.length-1].role==="assistant") {
-      // no new Cupid message yet; re-check later
+      // no new Cupid message yet; re-check later (no hazard roll while waiting —
+      // wave-1 bug: rolling on every poll killed 46% of personas in the reply queue)
       events.push({t:vnow+30,type:"persona_turn",p}); return;
     }
+    // hazard rolls only when the persona is actually about to take a turn
+    if(!ev.first && rnd()<p.behavior.dropoutHazard){ p.state.dropped=true; return; }
     const text=await personaReply(p,hist);
     (p.state.sentLog??=[]).push({body:text,at:new Date().toISOString()});
     await sendInbound(p.phone,text);
