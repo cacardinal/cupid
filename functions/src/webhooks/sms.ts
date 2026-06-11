@@ -437,16 +437,10 @@ async function getOtherSideMatch(
 
 function buildHelpMessage(onboarded: boolean): string {
   if (!onboarded) {
-    return "I'm Cupid, your AI matchmaker 💘 Just keep chatting — I'll ask you everything I need to find you a great match. There's nothing to configure.";
+    return "I'm Cupid. Keep texting and I'll figure out the rest. No setup, no forms.";
   }
   return (
-    "Here's what I can do:\n\n" +
-    "• Text me anytime to chat and update your preferences\n" +
-    '• Text "ready now" to go live — I\'ll find someone compatible in real time ⚡\n' +
-    '• Text "cancel" while live to stop the search\n' +
-    "• Reply yes/no to match proposals\n" +
-    "• After a video call, reply yes/no to exchange contact info\n\n" +
-    "I work best when you're honest with me 💛"
+    'Text me anytime to chat or update what you want. Say "ready now" to look for someone right now, "cancel" to stop. Yes or no answers my match questions. Honest answers get you better dates.'
   );
 }
 

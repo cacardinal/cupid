@@ -1,0 +1,95 @@
+{
+  "_note": "Weights from ACS 2024 (MCDC city profile), BLS OEWS May 2024, Gallup 2024 LGB 9.3%. City never-married 15+ = 48%. Sources in domains/cupid research log + agent citations 2026-06-11.",
+  "ageBands": {
+    "21-25": 0.2,
+    "26-30": 0.26,
+    "31-35": 0.22,
+    "36-40": 0.18,
+    "41-45": 0.14
+  },
+  "sex": {
+    "woman": 0.52,
+    "man": 0.48
+  },
+  "raceEthnicity": {
+    "white": 0.462,
+    "black": 0.405,
+    "hispanic": 0.057,
+    "asian": 0.039,
+    "multiracial_other": 0.037
+  },
+  "orientation": {
+    "straight": 0.907,
+    "gay": 0.02,
+    "lesbian": 0.014,
+    "bisexual": 0.052,
+    "other": 0.007
+  },
+  "education": {
+    "hs_or_less": 0.2,
+    "some_college": 0.35,
+    "bachelors": 0.241,
+    "graduate": 0.209
+  },
+  "occupations": {
+    "healthcare": 0.1,
+    "management_professional": 0.22,
+    "education": 0.07,
+    "tech": 0.07,
+    "finance_insurance": 0.06,
+    "service_hospitality": 0.19,
+    "office_admin": 0.12,
+    "transport_logistics": 0.08,
+    "creative_media": 0.04,
+    "trades_production": 0.05
+  },
+  "neighborhoods": [
+    "Tower Grove",
+    "Soulard",
+    "Central West End",
+    "The Grove",
+    "Dogtown",
+    "South City",
+    "Clayton",
+    "U City",
+    "Maplewood",
+    "Kirkwood",
+    "Florissant",
+    "St. Charles",
+    "Webster Groves",
+    "Downtown West",
+    "Benton Park"
+  ],
+  "intentByAge": {
+    "21-25": {
+      "long-term": 0.35,
+      "casual": 0.35,
+      "open": 0.25,
+      "unsure": 0.05
+    },
+    "26-30": {
+      "long-term": 0.5,
+      "casual": 0.2,
+      "open": 0.25,
+      "unsure": 0.05
+    },
+    "31-35": {
+      "long-term": 0.65,
+      "casual": 0.1,
+      "open": 0.2,
+      "unsure": 0.05
+    },
+    "36-40": {
+      "long-term": 0.7,
+      "casual": 0.08,
+      "open": 0.17,
+      "unsure": 0.05
+    },
+    "41-45": {
+      "long-term": 0.72,
+      "casual": 0.08,
+      "open": 0.15,
+      "unsure": 0.05
+    }
+  }
+}

@@ -22,7 +22,10 @@ const CUPID_NUMBER = () => {
 
 // ─── SMS ──────────────────────────────────────────────────────────────────────
 
-export async function sendSms(to: string, body: string): Promise<string> {
+export async function sendSms(to: string, rawBody: string): Promise<string> {
+  // Brand rule: nothing Cupid sends contains em/en dashes (model slips AND
+  // hardcoded strings are both covered here, the single outbound choke point).
+  const body = rawBody.replace(/\s*[—–]\s*/g, ", ");
   // Demo mode: write to Firestore outbox instead of hitting Twilio.
   // Lets the local demo harness render outbound messages as chat bubbles.
   if (process.env.DEMO_MODE === "true") {

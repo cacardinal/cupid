@@ -17,6 +17,41 @@ function getClient(): Anthropic {
   return _client;
 }
 
+// ─── Sim bridge (emulator-only) ───────────────────────────────────────────────
+// When CLAUDE_BRIDGE_URL is set, route completions through the local `claude -p`
+// bridge (sim/bridge.mjs) instead of the Anthropic API. Identical prompts and
+// response parsing; only the serving path differs. Hard-guarded to local dev.
+
+function bridgeUrl(): string | null {
+  const url = process.env.CLAUDE_BRIDGE_URL;
+  if (!url) return null;
+  if (process.env.FUNCTIONS_EMULATOR !== "true" && process.env.DEMO_MODE !== "true") {
+    throw new Error("CLAUDE_BRIDGE_URL is set outside the emulator. Refusing.");
+  }
+  return url;
+}
+
+interface CreateParams {
+  model: string;
+  max_tokens: number;
+  system?: string;
+  messages: Anthropic.MessageParam[];
+}
+
+export async function createCompletion(params: CreateParams): Promise<Anthropic.Message> {
+  const url = bridgeUrl();
+  if (!url) {
+    return getClient().messages.create(params as Anthropic.MessageCreateParamsNonStreaming);
+  }
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...params, _job: "cupid-engine" }),
+  });
+  if (!res.ok) throw new Error(`bridge ${res.status}: ${await res.text()}`);
+  return (await res.json()) as Anthropic.Message;
+}
+
 export interface ClaudeResponse {
   message: string;
   profileUpdates: Record<string, unknown> | null;
@@ -41,7 +76,7 @@ export async function generateConversationReply(
     { role: "user" as const, content: userMessage },
   ];
 
-  const response = await getClient().messages.create({
+  const response = await createCompletion({
     model: MODEL,
     max_tokens: 512,
     system: systemPrompt,
@@ -61,7 +96,7 @@ export async function generateMatchProposal(
   const matchDescription = buildMatchDescription(matchProfile);
   const systemPrompt = buildMatchProposalPrompt(userProfile, matchDescription);
 
-  const response = await getClient().messages.create({
+  const response = await createCompletion({
     model: MODEL,
     max_tokens: 256,
     system: systemPrompt,
@@ -91,7 +126,7 @@ export async function generateFriendCheckin(
     .map((t) => `${t.role}: ${t.content}`)
     .join("\n");
 
-  const response = await getClient().messages.create({
+  const response = await createCompletion({
     model: MODEL,
     max_tokens: 200,
     system: systemPrompt,
@@ -113,7 +148,7 @@ export async function generatePostVideoFollowUp(
 ): Promise<ClaudeResponse> {
   const systemPrompt = buildPostVideoFollowUpPrompt(userProfile);
 
-  const response = await getClient().messages.create({
+  const response = await createCompletion({
     model: MODEL,
     max_tokens: 256,
     system: systemPrompt,
@@ -134,7 +169,7 @@ export async function detectIntent(
   const keywordIntent = detectYesNoIntent(message);
   if (keywordIntent !== "ambiguous") return keywordIntent;
 
-  const response = await getClient().messages.create({
+  const response = await createCompletion({
     model: MODEL,
     max_tokens: 16,
     system: `The user was just asked whether they want to meet a potential match. Classify their reply as YES (they want to proceed), NO (they decline), or AMBIGUOUS (genuinely unclear). Enthusiasm, agreement, or interest counts as YES. Reply with exactly one word: YES, NO, or AMBIGUOUS.`,
@@ -179,6 +214,9 @@ function parseClaudeResponse(rawText: string): ClaudeResponse {
   const message = rawText
     .replace(/<profile_update>[\s\S]*?<\/profile_update>/g, "")
     .replace(/<profile_update>[\s\S]*$/, "")
+    // Brand rule: no em/en dashes in anything Cupid sends. The prompt forbids
+    // them but models still slip; enforce deterministically (wave-smoke finding).
+    .replace(/\s*[—–]\s*/g, ", ")
     .trim();
 
   return { message, profileUpdates, rawResponse: rawText };
