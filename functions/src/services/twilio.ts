@@ -23,10 +23,19 @@ const CUPID_NUMBER = () => {
 
 // ─── SMS ──────────────────────────────────────────────────────────────────────
 
-export async function sendSms(to: string, rawBody: string): Promise<string> {
+export interface SendOptions {
+  /** Phone numbers permitted in this message (contact-exchange flow). */
+  allowPhones?: string[];
+}
+
+export async function sendSms(to: string, rawBody: string, opts: SendOptions = {}): Promise<string> {
   // Brand rule: nothing Cupid sends contains em/en dashes (model slips AND
   // hardcoded strings are both covered here, the single outbound choke point).
-  const body = rawBody.replace(/\s*[—–]\s*/g, ", ");
+  const dashed = rawBody.replace(/\s*[—–]\s*/g, ", ");
+  // Anti-phishing: strip non-allowlisted URLs and phone numbers. Deterministic,
+  // covers prompt-injection-via-profile reaching another user's messages.
+  const { scrubOutbound } = await import("./outboundSecurity");
+  const body = scrubOutbound(dashed, opts.allowPhones).body;
   void track("message_sent", to, { length: body.length }); // analytics: `to` is hashed inside track, never sent raw
   // Demo mode: write to Firestore outbox instead of hitting Twilio.
   // Lets the local demo harness render outbound messages as chat bubbles.
@@ -116,7 +125,7 @@ export async function sendContactExchangeMessage(
 📱 ${otherPhone}
 
 Reach out and take it from here. Rooting for you both 💫`;
-  return sendSms(to, body);
+  return sendSms(to, body, { allowPhones: [otherPhone] });
 }
 
 export async function sendDeclinedMessage(to: string): Promise<string> {
