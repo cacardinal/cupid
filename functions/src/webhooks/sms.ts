@@ -200,6 +200,16 @@ async function handleConversationTurn(
   isNew: boolean
 ): Promise<void> {
   const phoneHash = profile.phoneHash;
+
+  // ── Daily turn cap (freeloader cost control, conversation path only) ──────────
+  const { checkDailyTurnCap, CAP_NOTICE_MESSAGE } = await import("../services/usageGuard");
+  const cap = await checkDailyTurnCap(profile);
+  if (!cap.allowed) {
+    if (cap.sendNotice) await sendSms(phone, CAP_NOTICE_MESSAGE);
+    return; // over cap: no model call; silent after the one notice
+  }
+  // ── End daily turn cap ────────────────────────────────────────────────────────
+
   const history = await getConversationHistory(phoneHash);
 
   await appendConversationTurn(phoneHash, {
