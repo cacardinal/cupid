@@ -4,10 +4,20 @@ import * as functions from "firebase-functions";
 // Initialize Firebase Admin
 admin.initializeApp();
 
+const ALL_SECRETS = [
+  "ANTHROPIC_API_KEY",
+  "TWILIO_ACCOUNT_SID",
+  "TWILIO_AUTH_TOKEN",
+  "TWILIO_PHONE_NUMBER",
+  "PHONE_ENCRYPTION_KEY",
+  "DEEPGRAM_API_KEY",
+  "DAILY_API_KEY",
+];
+
 // ─── SMS Webhook ──────────────────────────────────────────────────────────────
 
 export const smsWebhook = functions
-  .runWith({ timeoutSeconds: 60, memory: "512MB" })
+  .runWith({ timeoutSeconds: 60, memory: "512MB", secrets: ALL_SECRETS })
   .https.onRequest(async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method Not Allowed");
@@ -21,7 +31,7 @@ export const smsWebhook = functions
 
 /** Initial call entry — greet user, start gathering speech */
 export const voiceWebhook = functions
-  .runWith({ timeoutSeconds: 30, memory: "256MB" })
+  .runWith({ timeoutSeconds: 30, memory: "256MB", secrets: ALL_SECRETS })
   .https.onRequest(async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method Not Allowed");
@@ -33,7 +43,7 @@ export const voiceWebhook = functions
 
 /** Speech input received — transcribe, run Claude, respond */
 export const voiceGather = functions
-  .runWith({ timeoutSeconds: 60, memory: "512MB" })
+  .runWith({ timeoutSeconds: 60, memory: "512MB", secrets: ALL_SECRETS })
   .https.onRequest(async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method Not Allowed");
@@ -45,7 +55,7 @@ export const voiceGather = functions
 
 /** Recording ready — Deepgram transcription → async SMS response */
 export const voiceRecording = functions
-  .runWith({ timeoutSeconds: 120, memory: "512MB" })
+  .runWith({ timeoutSeconds: 120, memory: "512MB", secrets: ALL_SECRETS })
   .https.onRequest(async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method Not Allowed");
@@ -57,7 +67,7 @@ export const voiceRecording = functions
 
 /** Call status updates (completed, busy, no-answer) */
 export const voiceStatus = functions
-  .runWith({ timeoutSeconds: 10, memory: "128MB" })
+  .runWith({ timeoutSeconds: 10, memory: "128MB", secrets: ALL_SECRETS })
   .https.onRequest(async (req, res) => {
     const { handleCallStatus } = await import("./webhooks/voice");
     await handleCallStatus(req, res);
@@ -69,7 +79,7 @@ export const voiceStatus = functions
 // When liveStatus transitions from anything → "waiting", run the live scan.
 
 export const onUserLiveStatusChange = functions
-  .runWith({ timeoutSeconds: 60, memory: "512MB" })
+  .runWith({ timeoutSeconds: 60, memory: "512MB", secrets: ALL_SECRETS })
   .firestore.document("users/{phoneHash}")
   .onUpdate(async (change, context) => {
     const before = change.before.data();
@@ -111,7 +121,7 @@ export const onUserLiveStatusChange = functions
 // Sweeps users whose 30-minute live window has expired and sets them offline.
 
 export const expireLiveUsers = functions
-  .runWith({ timeoutSeconds: 120, memory: "256MB" })
+  .runWith({ timeoutSeconds: 120, memory: "256MB", secrets: ALL_SECRETS })
   .pubsub.schedule("every 5 minutes")
   .onRun(async () => {
     const { expireLiveWaitingUsers } = await import("./services/liveMatching");
@@ -124,7 +134,7 @@ export const expireLiveUsers = functions
 // Async fallback for users who aren't using live mode.
 
 export const nightlyMatching = functions
-  .runWith({ timeoutSeconds: 540, memory: "1GB" })
+  .runWith({ timeoutSeconds: 540, memory: "1GB", secrets: ALL_SECRETS })
   .pubsub.schedule("every day 02:00")
   .timeZone("America/Chicago")
   .onRun(async () => {
@@ -145,7 +155,7 @@ export const nightlyMatching = functions
 // ─── Scheduled: Video expiry follow-up ───────────────────────────────────────
 
 export const videoExpiryFollowUp = functions
-  .runWith({ timeoutSeconds: 120, memory: "256MB" })
+  .runWith({ timeoutSeconds: 120, memory: "256MB", secrets: ALL_SECRETS })
   .pubsub.schedule("every 5 minutes")
   .onRun(async () => {
     const { runVideoExpiryFollowUp } = await import("./scheduler/jobs");
@@ -157,7 +167,7 @@ export const videoExpiryFollowUp = functions
 // Sends thin-market and still-searching updates to waiting users daily.
 
 export const proactiveStatusUpdates = functions
-  .runWith({ timeoutSeconds: 300, memory: "512MB" })
+  .runWith({ timeoutSeconds: 300, memory: "512MB", secrets: ALL_SECRETS })
   .pubsub.schedule("every day 10:00")
   .timeZone("America/Chicago")
   .onRun(async () => {
@@ -226,7 +236,7 @@ const WAITLIST_ALLOWED_ORIGINS = new Set([
 ]);
 
 export const waitlistSignup = functions
-  .runWith({ timeoutSeconds: 15, memory: "256MB" })
+  .runWith({ timeoutSeconds: 15, memory: "256MB", secrets: ["PHONE_ENCRYPTION_KEY"] })
   .https.onRequest(async (req, res) => {
     const origin = req.header("Origin") ?? "";
     if (WAITLIST_ALLOWED_ORIGINS.has(origin)) {
