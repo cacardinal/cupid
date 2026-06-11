@@ -33,3 +33,6 @@ Thumbs.db
 coverage/
 functions/coverage/
 pubsub-debug.log
+
+# Generated video render artifacts (rebuild: bash demo/video/build.sh)
+demo/video/out/

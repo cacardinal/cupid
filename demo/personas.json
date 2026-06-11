@@ -1,0 +1,306 @@
+{
+  "comment": "Synthetic demo personas. Names/phones live ONLY in this harness file — the Cupid backend stays anonymous-by-design (hashed phones, no names). Pairs are engineered against computeCompatibility(): Maya+Eli ~93, Priya+Marcus ~73, Jordan+Sam ~56 (borderline), Tessa+Rob blocked (smoking dealbreaker), Diane+Walt blocked (age range), Chloe+Andre ~15 (intent mismatch).",
+  "personas": [
+    {
+      "name": "Maya",
+      "phone": "+13145550101",
+      "blurb": "29, pediatric nurse. Half of the high-score pair with Eli (~93).",
+      "creditsRemaining": 1,
+      "profile": {
+        "demographics": { "age": 29, "gender": "woman", "city": "st. louis", "orientation": "straight" },
+        "preferences": { "ageMin": 27, "ageMax": 35, "genderPreference": ["man"], "relationshipIntent": "long-term", "dealbreakers": [] },
+        "personality": {
+          "humorStyle": "dry", "communicationStyle": "texter",
+          "values": ["family", "honesty", "adventure"],
+          "interests": ["cooking", "hiking", "live music"],
+          "personalityTraits": ["introvert", "creative"],
+          "wantsKids": true, "occupation": "pediatric nurse", "education": "bachelor's degree"
+        }
+      },
+      "conversation": [
+        { "role": "user", "content": "My sister said I should try this. I'm Maya" },
+        { "role": "assistant", "content": "Hey Maya! Smart sister. I'm Cupid — I get to know you through conversation, then introduce you to people you'd actually click with. So what does a good weekend look like for you?" },
+        { "role": "user", "content": "Farmers market in the morning, then probably trying a new recipe or hitting a trail at Castlewood if the weather's good" },
+        { "role": "assistant", "content": "Cooking AND hiking — noted. Are you usually dragging friends along, or is solo time part of the appeal?" },
+        { "role": "user", "content": "Honestly I recharge alone. I love people but in small doses ha" },
+        { "role": "assistant", "content": "An introvert who can hold her own at a farmers market. Got it. Last thing — any hard nos I should know about?" }
+      ]
+    },
+    {
+      "name": "Eli",
+      "phone": "+13145550102",
+      "blurb": "31, architect. Half of the high-score pair with Maya (~93).",
+      "creditsRemaining": 2,
+      "profile": {
+        "demographics": { "age": 31, "gender": "man", "city": "st. louis", "orientation": "straight" },
+        "preferences": { "ageMin": 25, "ageMax": 33, "genderPreference": ["woman"], "relationshipIntent": "long-term", "dealbreakers": [] },
+        "personality": {
+          "humorStyle": "dry", "communicationStyle": "texter",
+          "values": ["family", "honesty", "adventure"],
+          "interests": ["cooking", "hiking", "live music", "photography"],
+          "personalityTraits": ["extrovert", "easygoing"],
+          "wantsKids": true, "occupation": "architect", "education": "master's degree"
+        }
+      },
+      "conversation": [
+        { "role": "user", "content": "Heard about this from a coworker. Worth a shot" },
+        { "role": "assistant", "content": "Welcome! Low effort, high signal — that's the pitch. I'm Cupid. Tell me something you did recently that you'd want to do again." },
+        { "role": "user", "content": "Caught a show at Off Broadway last week, and I've been perfecting a cacio e pepe. Also always down for a hike" },
+        { "role": "assistant", "content": "Live music, cooking, trails — you're making my job easy. Are you looking for something serious, or seeing where things go?" },
+        { "role": "user", "content": "Serious. I'm 31, done with the situationship phase" },
+        { "role": "assistant", "content": "Respect. Long-term it is. I've got a strong picture of you already — I'll be in touch when I find someone worth your time." }
+      ]
+    },
+    {
+      "name": "Priya",
+      "phone": "+13145550103",
+      "blurb": "33, product manager. High pair with Marcus (~73).",
+      "creditsRemaining": 1,
+      "profile": {
+        "demographics": { "age": 33, "gender": "woman", "city": "st. louis", "orientation": "straight" },
+        "preferences": { "ageMin": 30, "ageMax": 40, "genderPreference": ["man"], "relationshipIntent": "long-term", "dealbreakers": [] },
+        "personality": {
+          "humorStyle": "witty", "communicationStyle": "mixed",
+          "values": ["growth", "kindness", "ambition"],
+          "interests": ["running", "travel", "wine tasting"],
+          "personalityTraits": ["extrovert", "driven"],
+          "occupation": "product manager", "education": "MBA"
+        }
+      },
+      "conversation": [
+        { "role": "user", "content": "OK I'm intrigued. How does this work?" },
+        { "role": "assistant", "content": "Simple: we talk, I learn what makes you tick, and I only introduce you to people I genuinely think fit. No swiping. What fills your non-work hours?" },
+        { "role": "user", "content": "Training for the GO! half marathon, planning a Portugal trip, and dragging friends to wineries in Augusta" },
+        { "role": "assistant", "content": "A runner with a passport and good taste. What matters most to you in a person — not hobbies, character?" },
+        { "role": "user", "content": "Kindness first. And someone who's still growing — I can't do coasting" },
+        { "role": "assistant", "content": "Kindness and momentum. Noted and respected. I'll start looking." }
+      ]
+    },
+    {
+      "name": "Marcus",
+      "phone": "+13145550104",
+      "blurb": "35, high school teacher. High pair with Priya (~73).",
+      "creditsRemaining": 1,
+      "profile": {
+        "demographics": { "age": 35, "gender": "man", "city": "st. louis", "orientation": "straight" },
+        "preferences": { "ageMin": 28, "ageMax": 38, "genderPreference": ["woman"], "relationshipIntent": "long-term", "dealbreakers": [] },
+        "personality": {
+          "humorStyle": "witty", "communicationStyle": "in-person",
+          "values": ["growth", "kindness"],
+          "interests": ["running", "travel", "cooking", "jazz"],
+          "personalityTraits": ["introvert", "thoughtful"],
+          "occupation": "high school teacher", "education": "master's degree"
+        }
+      },
+      "conversation": [
+        { "role": "user", "content": "A friend swears by this so here I am" },
+        { "role": "assistant", "content": "Good friends give good referrals. I'm Cupid — think of me as the friend who actually listens before setting you up. What's your idea of a great first date?" },
+        { "role": "user", "content": "Honestly? A long walk, maybe ending at a jazz spot. I'd rather talk than perform" },
+        { "role": "assistant", "content": "Substance over spectacle. What do you do, and does it feed you or just pay you?" },
+        { "role": "user", "content": "I teach high school history. Exhausting but it feeds me. I also run most mornings" },
+        { "role": "assistant", "content": "A teacher who runs at dawn and loves jazz. You're going to be easy to match well. Give me a little time." }
+      ]
+    },
+    {
+      "name": "Jordan",
+      "phone": "+13145550105",
+      "blurb": "27, UX designer. Borderline pair with Sam (~56).",
+      "creditsRemaining": 1,
+      "profile": {
+        "demographics": { "age": 27, "gender": "man", "city": "st. louis", "orientation": "straight" },
+        "preferences": { "ageMin": 24, "ageMax": 30, "genderPreference": ["woman"], "relationshipIntent": "open", "dealbreakers": [] },
+        "personality": {
+          "humorStyle": "silly", "communicationStyle": "texter",
+          "values": ["loyalty", "creativity"],
+          "interests": ["board games", "anime", "cycling"],
+          "personalityTraits": ["introvert"],
+          "occupation": "UX designer"
+        }
+      },
+      "conversation": [
+        { "role": "user", "content": "yo. my roommate set this up for me lol" },
+        { "role": "assistant", "content": "Roommates with initiative — love it. I'm Cupid. Paint me a picture: it's Friday night, what are you doing?" },
+        { "role": "user", "content": "board game night with the crew or bingeing anime. sometimes a long bike ride saturday morning to make up for it" },
+        { "role": "assistant", "content": "Catan or something heavier? And are you looking for a relationship, or open to seeing what happens?" },
+        { "role": "user", "content": "wingspan guy actually. and yeah open — not in a rush but not against something real" },
+        { "role": "assistant", "content": "Open it is. Wingspan respect. I'll keep an eye out for someone who'd hold their own at your table." }
+      ]
+    },
+    {
+      "name": "Sam",
+      "phone": "+13145550106",
+      "blurb": "26, freelance illustrator. Borderline pair with Jordan (~56). Zero credits — paywall demo when her proposal lands.",
+      "creditsRemaining": 0,
+      "profile": {
+        "demographics": { "age": 26, "gender": "woman", "city": "st. louis", "orientation": "straight" },
+        "preferences": { "ageMin": 25, "ageMax": 31, "genderPreference": ["man"], "relationshipIntent": "long-term", "dealbreakers": [] },
+        "personality": {
+          "humorStyle": "sarcastic", "communicationStyle": "texter",
+          "values": ["loyalty", "creativity", "independence"],
+          "interests": ["board games", "painting", "yoga"],
+          "personalityTraits": ["creative"],
+          "occupation": "freelance illustrator"
+        }
+      },
+      "conversation": [
+        { "role": "user", "content": "Trying this because apps are a nightmare" },
+        { "role": "assistant", "content": "You're among friends — that nightmare is exactly why I exist. I'm Cupid. What does your week actually look like?" },
+        { "role": "user", "content": "I freelance illustration so my schedule's mine. Yoga most mornings, paint commissions till late, board games when friends pry me out" },
+        { "role": "user", "content": "And to be clear I want something real, not a texting pen pal" },
+        { "role": "assistant", "content": "An independent creative who knows what she wants — noted, long-term. Anything that's an instant no for you?" },
+        { "role": "user", "content": "Flakiness. And anyone who calls my job a hobby" },
+        { "role": "assistant", "content": "Reliability and respect. The bar should be that high. I'm on it." }
+      ]
+    },
+    {
+      "name": "Tessa",
+      "phone": "+13145550107",
+      "blurb": "30, physical therapist. Would score ~95 with Rob — blocked by her smoking dealbreaker. The money demo for hard filters.",
+      "creditsRemaining": 1,
+      "profile": {
+        "demographics": { "age": 30, "gender": "woman", "city": "st. louis", "orientation": "straight" },
+        "preferences": { "ageMin": 28, "ageMax": 38, "genderPreference": ["man"], "relationshipIntent": "long-term", "dealbreakers": ["smoking"] },
+        "personality": {
+          "humorStyle": "dry", "communicationStyle": "texter",
+          "values": ["honesty", "health"],
+          "interests": ["hiking", "cooking", "concerts"],
+          "personalityTraits": ["outdoorsy"],
+          "occupation": "physical therapist"
+        }
+      },
+      "conversation": [
+        { "role": "user", "content": "Hi! Friend recommended you" },
+        { "role": "assistant", "content": "Welcome! I'm Cupid — matchmaking by conversation, not swiping. What would your friends say you're about?" },
+        { "role": "user", "content": "They'd say I'm outside every chance I get. PT by day, trails and concerts otherwise. I cook a lot too" },
+        { "role": "assistant", "content": "Active and feeds people — strong combination. Any absolute dealbreakers I should respect?" },
+        { "role": "user", "content": "Smoking. Hard no, not negotiable. I work in rehab, I've seen too much" },
+        { "role": "assistant", "content": "Smoking is off the table, period. Everything else sounds refreshingly open. I'll find you someone who earns it." }
+      ]
+    },
+    {
+      "name": "Rob",
+      "phone": "+13145550108",
+      "blurb": "32, brewery operations manager. Tessa's near-perfect match on paper — but he smokes. Demonstrates the dealbreaker filter.",
+      "creditsRemaining": 1,
+      "profile": {
+        "demographics": { "age": 32, "gender": "man", "city": "st. louis", "orientation": "straight" },
+        "preferences": { "ageMin": 26, "ageMax": 36, "genderPreference": ["woman"], "relationshipIntent": "long-term", "dealbreakers": [] },
+        "personality": {
+          "humorStyle": "dry", "communicationStyle": "texter",
+          "values": ["honesty", "health"],
+          "interests": ["hiking", "cooking", "concerts"],
+          "personalityTraits": ["smoker", "spontaneous"],
+          "occupation": "brewery operations manager"
+        }
+      },
+      "conversation": [
+        { "role": "user", "content": "Alright let's see what the robot matchmaker can do" },
+        { "role": "assistant", "content": "Challenge accepted. I'm Cupid. Start me off — what's a perfect Saturday?" },
+        { "role": "user", "content": "Early hike, cook something big for whoever shows up, catch a show at the Pageant if anyone's playing. Cigarette on the porch in between, my one vice" },
+        { "role": "assistant", "content": "A host, a hiker, and honest about the vice — all useful to know. Looking for something lasting?" },
+        { "role": "user", "content": "Yeah, the real thing. I'm done with halfway" },
+        { "role": "assistant", "content": "The real thing it is. I'll be straight with you like you were with me — I only make intros I believe in." }
+      ]
+    },
+    {
+      "name": "Diane",
+      "phone": "+13145550109",
+      "blurb": "45, restaurant owner. Demonstrates the age-range hard filter — Walt's preference tops out at 44.",
+      "creditsRemaining": 1,
+      "profile": {
+        "demographics": { "age": 45, "gender": "woman", "city": "st. louis", "orientation": "straight" },
+        "preferences": { "ageMin": 40, "ageMax": 55, "genderPreference": ["man"], "relationshipIntent": "long-term", "dealbreakers": [] },
+        "personality": {
+          "humorStyle": "witty", "communicationStyle": "caller",
+          "values": ["stability", "humor"],
+          "interests": ["gardening", "wine tasting", "theater"],
+          "personalityTraits": ["warm", "direct"],
+          "occupation": "restaurant owner"
+        }
+      },
+      "conversation": [
+        { "role": "user", "content": "My daughter signed me up. Be gentle" },
+        { "role": "assistant", "content": "Your daughter has excellent judgment. I'm Cupid, and this is just a conversation — no profiles, no photos to agonize over. What brings you joy these days?" },
+        { "role": "user", "content": "My restaurant, my garden, and a good glass of wine at the Muny in summer" },
+        { "role": "assistant", "content": "A woman who builds things — a business, a garden, an evening. What are you hoping to find?" },
+        { "role": "user", "content": "Someone settled. 40s to mid 50s, knows who he is, makes me laugh" },
+        { "role": "assistant", "content": "Settled, self-aware, funny. A high bar that the right person will clear easily. Leave it with me." }
+      ]
+    },
+    {
+      "name": "Walt",
+      "phone": "+13145550110",
+      "blurb": "52, retired firefighter. Seeks 38-44 — Diane is 45, one year outside. Shows bidirectional age filtering.",
+      "creditsRemaining": 1,
+      "profile": {
+        "demographics": { "age": 52, "gender": "man", "city": "st. louis", "orientation": "straight" },
+        "preferences": { "ageMin": 38, "ageMax": 44, "genderPreference": ["woman"], "relationshipIntent": "long-term", "dealbreakers": [] },
+        "personality": {
+          "humorStyle": "witty", "communicationStyle": "caller",
+          "values": ["stability", "loyalty"],
+          "interests": ["golf", "wine tasting", "theater"],
+          "personalityTraits": ["steady", "social"],
+          "occupation": "retired firefighter"
+        }
+      },
+      "conversation": [
+        { "role": "user", "content": "Retired last year. Figured it's time to stop being a hermit" },
+        { "role": "assistant", "content": "Thirty years of service and now some time for yourself — welcome. I'm Cupid. What's filling the days now?" },
+        { "role": "user", "content": "Golf league, season tickets at the Fox, learning more about wine than a firefighter probably should" },
+        { "role": "assistant", "content": "The Fox and a wine habit — retirement suits you. What kind of person are you hoping to meet?" },
+        { "role": "user", "content": "Someone late 30s to mid 40s, loyal, likes a night out. I'm a one-woman man" },
+        { "role": "assistant", "content": "Loyal and lively, late 30s to mid 40s. Clear and reasonable. I'll get to work." }
+      ]
+    },
+    {
+      "name": "Chloe",
+      "phone": "+13145550111",
+      "blurb": "28, event coordinator. Casual intent vs Andre's long-term — shows intent scoring. Zero credits for the paywall demo.",
+      "creditsRemaining": 0,
+      "profile": {
+        "demographics": { "age": 28, "gender": "woman", "city": "st. louis", "orientation": "straight" },
+        "preferences": { "ageMin": 26, "ageMax": 34, "genderPreference": ["man"], "relationshipIntent": "casual", "dealbreakers": [] },
+        "personality": {
+          "humorStyle": "silly", "communicationStyle": "mixed",
+          "values": ["freedom", "spontaneity"],
+          "interests": ["festivals", "dancing", "photography"],
+          "personalityTraits": ["extrovert"],
+          "occupation": "event coordinator"
+        }
+      },
+      "conversation": [
+        { "role": "user", "content": "hiii ok what is this exactly" },
+        { "role": "assistant", "content": "Hi! I'm Cupid — an AI matchmaker you just... talk to. No profiles. So talk to me: what's your scene?" },
+        { "role": "user", "content": "festivals, dancing, anywhere with live music and good light for photos. I plan events for work so my weekends are usually GO time" },
+        { "role": "assistant", "content": "High energy, camera in hand. Are you looking for something serious right now, or keeping it light?" },
+        { "role": "user", "content": "light!! I just got out of something long. fun first, we'll see after" },
+        { "role": "assistant", "content": "Fun first, no pressure — totally valid chapter. I'll look for someone who can keep up." }
+      ]
+    },
+    {
+      "name": "Andre",
+      "phone": "+13145550112",
+      "blurb": "30, librarian. Long-term intent, quiet interests — scores ~15 with Chloe. Shows why intent alignment is weighted 30%.",
+      "creditsRemaining": 1,
+      "profile": {
+        "demographics": { "age": 30, "gender": "man", "city": "st. louis", "orientation": "straight" },
+        "preferences": { "ageMin": 25, "ageMax": 33, "genderPreference": ["woman"], "relationshipIntent": "long-term", "dealbreakers": [] },
+        "personality": {
+          "humorStyle": "deadpan", "communicationStyle": "caller",
+          "values": ["stability", "family"],
+          "interests": ["reading", "museums", "chess"],
+          "personalityTraits": ["introvert"],
+          "occupation": "librarian"
+        }
+      },
+      "conversation": [
+        { "role": "user", "content": "Hello. A patron at the library recommended this, oddly enough" },
+        { "role": "assistant", "content": "Library word-of-mouth might be my favorite referral channel yet. I'm Cupid. What does a good evening look like for you?" },
+        { "role": "user", "content": "A novel, a phone call with someone interesting, or the chess club on Thursdays. The art museum on weekends" },
+        { "role": "assistant", "content": "A reader who'd rather call than text — increasingly rare. What are you ultimately looking for?" },
+        { "role": "user", "content": "Marriage, eventually. Family. I see no reason to pretend otherwise" },
+        { "role": "assistant", "content": "Clarity like that saves everyone time. Long-term, family-minded. I'll choose carefully." }
+      ]
+    }
+  ]
+}
