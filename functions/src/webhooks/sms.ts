@@ -120,6 +120,18 @@ export async function handleInboundSms(req: Request, res: Response): Promise<voi
       return;
     }
 
+    // ── BEGIN sharing/wingman routing (sharing branch) ────────────────────────
+    // Consent-first growth loop: blurb / vCard / wingman replies go to the
+    // sender only. See services/sharing.ts. Keep this block self-contained.
+    {
+      const { handleSharingIntent } = await import("../services/sharing");
+      if (await handleSharingIntent(from, body, profile)) {
+        res.status(200).send("<Response/>");
+        return;
+      }
+    }
+    // ── END sharing/wingman routing ───────────────────────────────────────────
+
     // ── Active match response ──────────────────────────────────────────────────
 
     const activeMatch = await getActiveMatchForUser(phoneHash);

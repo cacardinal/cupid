@@ -54,6 +54,36 @@ export async function sendSms(to: string, rawBody: string): Promise<string> {
   return lastSid;
 }
 
+// ─── Contact card (vCard via MMS) ─────────────────────────────────────────────
+
+const CONTACT_CARD_URL = "https://textcupid.app/cupid.vcf";
+
+/** Send Cupid's vCard so the user can save the number and share it onward. */
+export async function sendContactCard(to: string): Promise<string> {
+  const body = "Here's my card 💘";
+
+  // Demo mode: write to the outbox with the mediaUrl so the harness can
+  // render the attachment bubble.
+  if (process.env.DEMO_MODE === "true") {
+    const { getFirestore, Timestamp } = await import("firebase-admin/firestore");
+    const ref = await getFirestore().collection("demo_outbox").add({
+      to,
+      body,
+      mediaUrl: CONTACT_CARD_URL,
+      sentAt: Timestamp.now(),
+    });
+    return `demo-${ref.id}`;
+  }
+
+  const msg = await getClient().messages.create({
+    body,
+    from: CUPID_NUMBER(),
+    to,
+    mediaUrl: [CONTACT_CARD_URL],
+  });
+  return msg.sid;
+}
+
 export async function sendIntroductionMessage(
   to: string,
   proposalText: string
