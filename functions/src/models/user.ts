@@ -62,6 +62,16 @@ export interface UserProfile {
   liveStatusUntil?: Timestamp; // When "waiting" expires (default: +30 min)
   liveSessionId?: string;      // Tracks the current live session to prevent double-connects
 
+  // Narrative memory layer (internal context, never sent to the user directly)
+  narrative?: string;          // Running 2-4 sentence third-person life summary
+  narrativeUpdatedAt?: Timestamp;
+  narrativeTurnCount?: number; // Total conversation turns seen at last narrative update
+
+  // Daily conversation budget (usageGuard.ts, freeloader cost control)
+  dailyTurnDate?: string;      // CT date string YYYY-MM-DD
+  dailyTurnCount?: number;
+  capNoticeDate?: string;      // CT date the over-cap notice was sent
+
   // Referral fields
   referralCode: string;        // "CUP-" + first 6 chars of phoneHash (uppercase)
   referredBy?: string;         // referralCode of the person who referred this user

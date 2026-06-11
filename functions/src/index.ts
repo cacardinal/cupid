@@ -12,6 +12,7 @@ const ALL_SECRETS = [
   "PHONE_ENCRYPTION_KEY",
   "DEEPGRAM_API_KEY",
   "DAILY_API_KEY",
+  "POSTHOG_API_KEY", // optional — analytics no-ops when unset (see services/analytics.ts)
 ];
 
 // ─── SMS Webhook ──────────────────────────────────────────────────────────────
@@ -229,6 +230,23 @@ export const demoAdmin = functions
         const { runFriendCheckins } = await import("./scheduler/friendCheckins");
         const sent = await runFriendCheckins();
         res.status(200).json({ ok: true, action, summary: { sent } });
+        return;
+      }
+
+      if (action === "createCampaignCode") {
+        const { createCampaignCode } = await import("./services/campaignCodes");
+        const code = String(req.body?.code ?? "");
+        const credits = req.body?.credits !== undefined ? Number(req.body.credits) : undefined;
+        const maxRedemptions =
+          req.body?.maxRedemptions !== undefined && req.body?.maxRedemptions !== null
+            ? Number(req.body.maxRedemptions)
+            : null;
+        if (!code) {
+          res.status(400).json({ error: "code is required" });
+          return;
+        }
+        const campaignCode = await createCampaignCode(code, credits, maxRedemptions);
+        res.status(200).json({ ok: true, action, campaignCode });
         return;
       }
 

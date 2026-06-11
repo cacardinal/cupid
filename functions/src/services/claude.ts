@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { sanitizeProfileValue } from "./outboundSecurity";
 import { UserProfile, ConversationTurn, OnboardingStage } from "../models/user";
 import {
   buildOnboardingSystemPrompt,
@@ -7,7 +8,7 @@ import {
   buildMatchDescription,
 } from "../prompts/cupid";
 
-const MODEL = "claude-sonnet-4-5";
+export const MODEL = "claude-sonnet-4-5";
 
 let _client: Anthropic | null = null;
 function getClient(): Anthropic {
@@ -237,7 +238,7 @@ export function mergeProfileUpdates(
     merged.demographics = { ...profile.demographics };
     for (const [k, v] of Object.entries(demo)) {
       if (v !== null && v !== undefined) {
-        (merged.demographics as Record<string, unknown>)[k] = v;
+        (merged.demographics as Record<string, unknown>)[k] = sanitizeProfileValue(v);
       }
     }
   }
@@ -247,7 +248,7 @@ export function mergeProfileUpdates(
     merged.preferences = { ...profile.preferences };
     for (const [k, v] of Object.entries(prefs)) {
       if (v !== null && v !== undefined) {
-        (merged.preferences as Record<string, unknown>)[k] = v;
+        (merged.preferences as Record<string, unknown>)[k] = sanitizeProfileValue(v);
       }
     }
   }
@@ -257,7 +258,7 @@ export function mergeProfileUpdates(
     merged.personality = { ...profile.personality };
     for (const [k, v] of Object.entries(pers)) {
       if (v !== null && v !== undefined) {
-        (merged.personality as Record<string, unknown>)[k] = v;
+        (merged.personality as Record<string, unknown>)[k] = sanitizeProfileValue(v);
       }
     }
   }

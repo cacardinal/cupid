@@ -26,6 +26,7 @@ import { detectLiveIntent, detectCancelLiveIntent, detectHelpIntent } from "../s
 import { setUserLive, setUserOffline } from "../services/liveMatching";
 import { UserProfile } from "../models/user";
 import { extractReferralCode, processReferral, buildShareMessage } from "../services/referral";
+import { track } from "../services/analytics"; // analytics: all calls below are `void track(...)` fire-and-forget
 
 // ─── Main SMS webhook handler ─────────────────────────────────────────────────
 
@@ -65,6 +66,7 @@ export async function handleInboundSms(req: Request, res: Response): Promise<voi
     const { profile: rawProfile, isNew } = await getOrCreateUser(from);
     let profile = rawProfile;
     const phoneHash = profile.phoneHash;
+    void track("message_received", phoneHash, { isNew, stage: profile.onboardingStage }); // analytics
 
     // ── Referral detection (new users only) ──────────────────────────────────
 
@@ -81,9 +83,39 @@ export async function handleInboundSms(req: Request, res: Response): Promise<voi
           // Refresh profile so downstream sees the updated credits
           profile = { ...profile, creditsRemaining: (profile.creditsRemaining ?? 1) + 1, referredBy: code };
           functions.logger.info("Referral applied", { newUser: phoneHash.slice(0, 8), referrer: referrerHash.slice(0, 8) });
+          void track("referral_redeemed", phoneHash, { referrer: referrerHash.slice(0, 8) }); // analytics
         }
       }
     }
+
+    // ── BEGIN campaign-codes wiring ───────────────────────────────────────────
+    // Campaign codes (e.g. TEXTCUPID) work on ANY message, not just the first.
+    // On success, Cupid confirms in one short SMS before the normal reply.
+    try {
+      const { detectCampaignCode, redeemCampaignCode, buildCampaignConfirmation } =
+        await import("../services/campaignCodes");
+      const campaignCode = await detectCampaignCode(body);
+      if (campaignCode) {
+        const redemption = await redeemCampaignCode(campaignCode, phoneHash);
+        if (redemption.redeemed) {
+          // Refresh in-memory profile so downstream sees the updated credits
+          profile = {
+            ...profile,
+            creditsRemaining: (profile.creditsRemaining ?? 1) + redemption.creditsAwarded,
+          };
+          await sendSms(from, buildCampaignConfirmation(campaignCode, redemption.creditsAwarded));
+          functions.logger.info("Campaign code redeemed", {
+            code: campaignCode,
+            user: phoneHash.slice(0, 8),
+            creditsAwarded: redemption.creditsAwarded,
+          });
+        }
+      }
+    } catch (campaignErr) {
+      // Never let campaign-code handling break the main SMS flow
+      functions.logger.error("Campaign code handling failed", campaignErr);
+    }
+    // ── END campaign-codes wiring ─────────────────────────────────────────────
 
     // ── Live mode routing (onboarded users only) ──────────────────────────────
 
@@ -119,6 +151,18 @@ export async function handleInboundSms(req: Request, res: Response): Promise<voi
       res.status(200).send("<Response/>");
       return;
     }
+
+    // ── BEGIN sharing/wingman routing (sharing branch) ────────────────────────
+    // Consent-first growth loop: blurb / vCard / wingman replies go to the
+    // sender only. See services/sharing.ts. Keep this block self-contained.
+    {
+      const { handleSharingIntent } = await import("../services/sharing");
+      if (await handleSharingIntent(from, body, profile)) {
+        res.status(200).send("<Response/>");
+        return;
+      }
+    }
+    // ── END sharing/wingman routing ───────────────────────────────────────────
 
     // ── Active match response ──────────────────────────────────────────────────
 
@@ -156,6 +200,16 @@ async function handleConversationTurn(
   isNew: boolean
 ): Promise<void> {
   const phoneHash = profile.phoneHash;
+
+  // ── Daily turn cap (freeloader cost control, conversation path only) ──────────
+  const { checkDailyTurnCap, CAP_NOTICE_MESSAGE } = await import("../services/usageGuard");
+  const cap = await checkDailyTurnCap(profile);
+  if (!cap.allowed) {
+    if (cap.sendNotice) await sendSms(phone, CAP_NOTICE_MESSAGE);
+    return; // over cap: no model call; silent after the one notice
+  }
+  // ── End daily turn cap ────────────────────────────────────────────────────────
+
   const history = await getConversationHistory(phoneHash);
 
   await appendConversationTurn(phoneHash, {
@@ -188,11 +242,18 @@ async function handleConversationTurn(
   const justCompleted = result.profileUpdates?.onboardingComplete && !profile.onboardingComplete;
   let replyText = result.message;
   if (justCompleted) {
+    void track("onboarding_completed", phoneHash); // analytics
     replyText +=
       "\n\nPS: Text me \"ready now\" anytime you want to connect with someone instantly. I'll find a match in real time 🔥";
   }
 
   await sendSms(phone, replyText);
+
+  // ── Narrative memory refresh (fire-and-forget, AFTER send: zero user latency) ──
+  void import("../services/narrative")
+    .then(({ maybeUpdateNarrative }) => maybeUpdateNarrative(phoneHash, profile, history))
+    .catch((err) => functions.logger.error("Narrative dispatch failed", err));
+  // ── End narrative memory refresh ──────────────────────────────────────────────
 
   // Follow-up: share message (separate SMS so it reads as a beat after the greeting)
   if (justCompleted) {
@@ -203,6 +264,19 @@ async function handleConversationTurn(
       await sendSms(phone, shareMsg);
     }
   }
+
+  // ── Instant matching (fire-and-forget) ────────────────────────────────────────
+  // The moment a profile is complete, try to introduce them now instead of
+  // waiting for the nightly sweep. Only fires a real intro on a high-confidence
+  // pair; texts both sides, so a waiting user also gets matched when a strong
+  // new candidate finishes onboarding. Never blocks the conversation.
+  if (justCompleted) {
+    void import("../scheduler/jobs")
+      .then(({ attemptInstantMatch }) => attemptInstantMatch(phoneHash))
+      .then((r) => functions.logger.info("Instant match attempt", r))
+      .catch((err) => functions.logger.error("Instant match dispatch failed", err));
+  }
+  // ── End instant matching ──────────────────────────────────────────────────────
 }
 
 // ─── Match response handler ───────────────────────────────────────────────────
@@ -230,6 +304,7 @@ async function handleMatchResponse(
         userAccepted: true,
         status: "user_accepted",
       });
+      void track("match_accepted", phoneHash, { matchId }); // analytics
 
       const otherHash = matchRecord.matchedUserId;
       const otherMatchSnap = await getOtherSideMatch(otherHash, phoneHash);
@@ -244,6 +319,7 @@ async function handleMatchResponse(
       }
     } else if (intent === "no") {
       await updateMatchStatus(phoneHash, matchId, "user_declined");
+      void track("match_declined", phoneHash, { matchId }); // analytics
       await sendSms(
         phone,
         "No problem at all! I'll keep an eye out for better fits. These things take time."
@@ -265,6 +341,7 @@ async function handleMatchResponse(
       const otherMatchSnap = await getOtherSideMatch(otherHash, phoneHash);
 
       if (otherMatchSnap?.contactExchanged === true) {
+        void track("contact_exchanged", phoneHash, { matchId }); // analytics
         await sendContactExchangeMessage(
           phone,
           "your match",
@@ -334,6 +411,7 @@ async function handleSchedulingReply(
         updateMatchRecord(phoneHash, matchId, { status: "scheduled" }),
         other ? updateMatchRecord(otherHash, other.id!, { status: "scheduled" }) : null,
       ]);
+      void track("date_scheduled", phoneHash, { matchId }); // analytics
       const when = matchRecord.scheduledAt.toDate();
       await Promise.all([
         sendSms(phone, scheduledConfirmationMessage(when, matchId, phoneHash)),
