@@ -194,6 +194,12 @@ async function handleConversationTurn(
 
   await sendSms(phone, replyText);
 
+  // ── Narrative memory refresh (fire-and-forget, AFTER send: zero user latency) ──
+  void import("../services/narrative")
+    .then(({ maybeUpdateNarrative }) => maybeUpdateNarrative(phoneHash, profile, history))
+    .catch((err) => functions.logger.error("Narrative dispatch failed", err));
+  // ── End narrative memory refresh ──────────────────────────────────────────────
+
   // Follow-up: share message (separate SMS so it reads as a beat after the greeting)
   if (justCompleted) {
     const cupidNumber = process.env.TWILIO_PHONE_NUMBER ?? "";

@@ -103,8 +103,12 @@ export function buildOnboardingSystemPrompt(profile: UserProfile, stage: Onboard
     complete: `Onboarding is complete. You're in ongoing matchmaker mode. You might check in, share updates on their search, or ask a clarifying question to sharpen their profile. Current profile: ${profileSummary}.`,
   };
 
-  return `${CUPID_PERSONA}
+  const narrativeBlock = profile.narrative
+    ? `\nWHAT YOU REMEMBER ABOUT THEM (older context): ${profile.narrative}\n`
+    : "";
 
+  return `${CUPID_PERSONA}
+${narrativeBlock}
 CURRENT STAGE: ${stage}
 STAGE GUIDANCE: ${stageGuidance[stage]}
 
@@ -187,7 +191,7 @@ You are checking in on this user like a thoughtful friend would — unprompted, 
 
 What you know about them:
 ${summary}
-
+${profile.narrative ? `\nWHAT YOU REMEMBER ABOUT THEM (older context): ${profile.narrative}\n` : ""}
 Rules for this check-in:
 - ONE short message (1-2 sentences). It's a text from a friend, not a newsletter.
 - Reference something SPECIFIC they told you (an interest, plan, job, or detail from the recent conversation) and ask about it.

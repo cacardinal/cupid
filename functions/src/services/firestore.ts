@@ -160,6 +160,21 @@ export async function getConversationHistory(
   return snap.docs.map((d) => ({ id: d.id, ...d.data() } as ConversationTurn));
 }
 
+/**
+ * Total turns ever stored for a user (count() aggregate — one cheap read,
+ * no counter field to maintain or backfill). Used by the narrative memory
+ * layer to decide when a summary refresh is due.
+ */
+export async function getConversationTurnCount(phoneHash: string): Promise<number> {
+  const snap = await db()
+    .collection(USERS_COL)
+    .doc(phoneHash)
+    .collection(CONVERSATIONS_SUB)
+    .count()
+    .get();
+  return snap.data().count;
+}
+
 // ─── Match records ────────────────────────────────────────────────────────────
 
 export async function createMatchRecord(match: Omit<MatchRecord, "id">): Promise<string> {

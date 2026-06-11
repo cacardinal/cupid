@@ -7,7 +7,7 @@ import {
   buildMatchDescription,
 } from "../prompts/cupid";
 
-const MODEL = "claude-sonnet-4-5";
+export const MODEL = "claude-sonnet-4-5";
 
 let _client: Anthropic | null = null;
 function getClient(): Anthropic {
