@@ -12,6 +12,7 @@ const ALL_SECRETS = [
   "PHONE_ENCRYPTION_KEY",
   "DEEPGRAM_API_KEY",
   "DAILY_API_KEY",
+  "POSTHOG_API_KEY", // optional — analytics no-ops when unset (see services/analytics.ts)
 ];
 
 // ─── SMS Webhook ──────────────────────────────────────────────────────────────

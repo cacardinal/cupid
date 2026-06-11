@@ -1,6 +1,7 @@
 import * as functions from "firebase-functions";
 import { Timestamp } from "firebase-admin/firestore";
 import { UserProfile } from "../models/user";
+import { track } from "../services/analytics"; // analytics: fire-and-forget
 
 /**
  * Friend mode: Cupid periodically checks in like a thoughtful friend —
@@ -84,6 +85,7 @@ export async function runFriendCheckins(limit = 25): Promise<number> {
       });
 
       sent++;
+      void track("checkin_sent", user.phoneHash, { checkinCount: (user.checkinCount ?? 0) + 1 }); // analytics
       functions.logger.info("Friend check-in sent", { userHash: user.phoneHash.slice(0, 8) });
     } catch (err) {
       functions.logger.error("Friend check-in error", { userHash: user.phoneHash.slice(0, 8), err });

@@ -1,4 +1,5 @@
 import twilio from "twilio";
+import { track } from "./analytics";
 
 let _client: twilio.Twilio | null = null;
 
@@ -26,6 +27,7 @@ export async function sendSms(to: string, rawBody: string): Promise<string> {
   // Brand rule: nothing Cupid sends contains em/en dashes (model slips AND
   // hardcoded strings are both covered here, the single outbound choke point).
   const body = rawBody.replace(/\s*[—–]\s*/g, ", ");
+  void track("message_sent", to, { length: body.length }); // analytics: `to` is hashed inside track, never sent raw
   // Demo mode: write to Firestore outbox instead of hitting Twilio.
   // Lets the local demo harness render outbound messages as chat bubbles.
   if (process.env.DEMO_MODE === "true") {

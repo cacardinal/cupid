@@ -8,6 +8,7 @@ import {
   createDefaultProfile,
 } from "../models/user";
 import * as crypto from "crypto";
+import { track } from "./analytics";
 
 const db = () => admin.firestore();
 
@@ -88,6 +89,7 @@ export async function getOrCreateUser(phone: string): Promise<{ profile: UserPro
   );
   await batch.commit();
 
+  void track("user_created", phoneHash); // analytics: fire-and-forget
   return { profile, isNew: true };
 }
 
