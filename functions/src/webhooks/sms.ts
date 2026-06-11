@@ -26,6 +26,7 @@ import { detectLiveIntent, detectCancelLiveIntent, detectHelpIntent } from "../s
 import { setUserLive, setUserOffline } from "../services/liveMatching";
 import { UserProfile } from "../models/user";
 import { extractReferralCode, processReferral, buildShareMessage } from "../services/referral";
+import { track } from "../services/analytics"; // analytics: all calls below are `void track(...)` fire-and-forget
 
 // ─── Main SMS webhook handler ─────────────────────────────────────────────────
 
@@ -65,6 +66,7 @@ export async function handleInboundSms(req: Request, res: Response): Promise<voi
     const { profile: rawProfile, isNew } = await getOrCreateUser(from);
     let profile = rawProfile;
     const phoneHash = profile.phoneHash;
+    void track("message_received", phoneHash, { isNew, stage: profile.onboardingStage }); // analytics
 
     // ── Referral detection (new users only) ──────────────────────────────────
 
@@ -81,6 +83,7 @@ export async function handleInboundSms(req: Request, res: Response): Promise<voi
           // Refresh profile so downstream sees the updated credits
           profile = { ...profile, creditsRemaining: (profile.creditsRemaining ?? 1) + 1, referredBy: code };
           functions.logger.info("Referral applied", { newUser: phoneHash.slice(0, 8), referrer: referrerHash.slice(0, 8) });
+          void track("referral_redeemed", phoneHash, { referrer: referrerHash.slice(0, 8) }); // analytics
         }
       }
     }
@@ -200,6 +203,7 @@ async function handleConversationTurn(
   const justCompleted = result.profileUpdates?.onboardingComplete && !profile.onboardingComplete;
   let replyText = result.message;
   if (justCompleted) {
+    void track("onboarding_completed", phoneHash); // analytics
     replyText +=
       "\n\nPS: Text me \"ready now\" anytime you want to connect with someone instantly. I'll find a match in real time 🔥";
   }
@@ -248,6 +252,7 @@ async function handleMatchResponse(
         userAccepted: true,
         status: "user_accepted",
       });
+      void track("match_accepted", phoneHash, { matchId }); // analytics
 
       const otherHash = matchRecord.matchedUserId;
       const otherMatchSnap = await getOtherSideMatch(otherHash, phoneHash);
@@ -262,6 +267,7 @@ async function handleMatchResponse(
       }
     } else if (intent === "no") {
       await updateMatchStatus(phoneHash, matchId, "user_declined");
+      void track("match_declined", phoneHash, { matchId }); // analytics
       await sendSms(
         phone,
         "No problem at all! I'll keep an eye out for better fits. These things take time."
@@ -283,6 +289,7 @@ async function handleMatchResponse(
       const otherMatchSnap = await getOtherSideMatch(otherHash, phoneHash);
 
       if (otherMatchSnap?.contactExchanged === true) {
+        void track("contact_exchanged", phoneHash, { matchId }); // analytics
         await sendContactExchangeMessage(
           phone,
           "your match",
@@ -352,6 +359,7 @@ async function handleSchedulingReply(
         updateMatchRecord(phoneHash, matchId, { status: "scheduled" }),
         other ? updateMatchRecord(otherHash, other.id!, { status: "scheduled" }) : null,
       ]);
+      void track("date_scheduled", phoneHash, { matchId }); // analytics
       const when = matchRecord.scheduledAt.toDate();
       await Promise.all([
         sendSms(phone, scheduledConfirmationMessage(when, matchId, phoneHash)),

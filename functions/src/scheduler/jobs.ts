@@ -1,4 +1,7 @@
 import * as functions from "firebase-functions";
+import { track } from "../services/analytics"; // analytics: fire-and-forget
+
+
 
 export interface MatchingRunSummary {
   eligibleUsers: number;
@@ -69,6 +72,8 @@ export async function runNightlyMatching(): Promise<MatchingRunSummary> {
         updateUser(pair.userB.phoneHash, { matchCooldownUntil: cooldown }),
       ]);
 
+      void track("match_proposed", pair.userA.phoneHash, { matchId: matchIdA, score: pair.score }); // analytics
+      void track("match_proposed", pair.userB.phoneHash, { matchId: matchIdB, score: pair.score }); // analytics
       functions.logger.info("Nightly match created", {
         score: pair.score,
         matchIdA,
@@ -227,6 +232,7 @@ export async function runScheduledDates(force = false): Promise<ScheduledDatesSu
           pA ? sendVideoRoomLink(pA, room.url, "your match") : null,
           pB ? sendVideoRoomLink(pB, room.url, "your match") : null,
         ]);
+        void track("video_room_opened", user.phoneHash, { matchId: match.id }); // analytics
         summary.roomsOpened++;
         functions.logger.info("Scheduled date room opened", { matchId: match.id });
       }
