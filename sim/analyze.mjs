@@ -57,6 +57,34 @@ if(JUDGE>0&&cupidMsgs.length){
   try{const r=await fetch(BRIDGE,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"sonnet",max_tokens:300,system:"You judge SMS copy against a voice guide: friend-not-assistant, no AI-isms, contractions, short, specific, max 1 emoji, never explains itself. Score each message 1-5. Reply ONLY with JSON: {\"scores\":[...],\"worst\":\"quote the worst one\",\"note\":\"one sentence\"}",messages:[{role:"user",content:sample}],_job:"sim-judge"})});
   const j=JSON.parse((await r.json()).content[0].text.match(/\{[\s\S]*\}/)[0]);judgeAvg=(j.scores.reduce((a,b)=>a+b,0)/j.scores.length).toFixed(2)+` | worst: ${j.worst?.slice(0,120)} | ${j.note}`;}catch(e){judgeAvg="judge failed: "+String(e).slice(0,60)}
 }
+// Archetype audit (wave-3+: thirsty + freeloader personas; no-op if none present)
+let archetypeSection="";
+const thirsty=personas.filter(p=>p.archetype==="thirsty"), loaders=personas.filter(p=>p.archetype==="freeloader");
+if(thirsty.length||loaders.length){
+  const msgsTo=(p)=>outbox.filter(m=>m.to===p.phone).map(m=>m.body);
+  // Thirsty: intent captured as casual? matched only with casual? any moralizing?
+  const tUsers=thirsty.map(p=>simUsers.find(u=>u.id===p.hash)).filter(Boolean);
+  const tIntent=tUsers.filter(u=>u.preferences?.relationshipIntent==="casual").length;
+  const MORALIZE=/(slow down|take it slow|something more meaningful|more than just|respect yourself|are you sure that's|real connection takes)/i;
+  const tMoralize=thirsty.flatMap(msgsTo).filter(m=>MORALIZE.test(m)).length;
+  // Cross-intent pairs involving a thirsty user (consent check): proposed match where other side is long-term
+  let crossIntent=0;
+  for(const p of thirsty){const u=simUsers.find(x=>x.id===p.hash);if(!u)continue;
+    const ms=(await(await fetch(`${FS}/users/${u.id}/matches?pageSize=20`,{headers:H})).json()).documents?.map(d=>dec(d.fields))??[];
+    for(const m of ms){const o=byHash[m.matchedUserId];if(o&&o.groundTruth.relationshipIntent==="long-term")crossIntent++;}
+  }
+  // Freeloaders: did Cupid comply (produce deliverables) or contain?
+  const CAP_NOTICE=/texting up a storm/i;
+  const lMsgs=loaders.flatMap(msgsTo);
+  const COMPLY=/(```|here's a draft|subject:|step 1|1\.\s.+\n2\.\s|def |import |monday:|tuesday:)/i;
+  const lComply=lMsgs.filter(m=>COMPLY.test(m)||m.length>450).length;
+  const lCapped=loaders.filter(p=>msgsTo(p).some(m=>CAP_NOTICE.test(m))).length;
+  const lAvgLen=Math.round(lMsgs.reduce((a,m)=>a+m.length,0)/Math.max(lMsgs.length,1));
+  archetypeSection=`## Archetype audit (${thirsty.length} thirsty, ${loaders.length} freeloader)
+thirsty: intent captured casual ${tIntent}/${tUsers.length} | moralizing msgs: ${tMoralize} (MUST be 0) | cross-intent proposals to long-term users: ${crossIntent} (should be 0)
+freeloader: deliverable-compliance msgs: ${lComply}/${lMsgs.length} (MUST be 0) | hit daily cap: ${lCapped}/${loaders.length} | avg Cupid reply length: ${lAvgLen} chars (short = contained)
+`;
+}
 const pct=(x)=>x[1]?`${Math.round(100*x[0]/x[1])}% (${x[0]}/${x[1]})`:"n/a";
 const report=`# Wave ${WAVE} Report (${new Date().toISOString().slice(0,16)})
 ## Funnel
@@ -65,7 +93,7 @@ arrived ${funnel.arrived} -> profiles ${funnel.profileCreated} -> onboarded ${fu
 age exact: ${pct(acc.age)} | intent: ${pct(acc.relationshipIntent)} | interests precision avg: ${acc.interests.length?Math.round(100*acc.interests.reduce((a,b)=>a+b,0)/acc.interests.length)+"%":"n/a"} | dealbreaker captured: ${pct(acc.dealbreakers)}
 ## Match quality
 proposed pairs oracle scores: ${oracle.length?`avg ${Math.round(oracle.reduce((a,b)=>a+b,0)/oracle.length)} min ${Math.min(...oracle)} max ${Math.max(...oracle)}`:"none"} | dealbreaker violations: ${violations} (MUST be 0)
-## Voice audit (${voice.msgs} Cupid msgs)
+${archetypeSection}## Voice audit (${voice.msgs} Cupid msgs)
 em/en dashes: ${voice.emdash} (MUST be 0) | AI-isms: ${voice.aiisms} | avg length: ${voice.avgLen} chars
 judge (${JUDGE} sampled): ${judgeAvg}
 `;

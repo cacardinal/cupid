@@ -6,6 +6,7 @@ const DIR = path.dirname(fileURLToPath(import.meta.url));
 const CENSUS = JSON.parse(fs.readFileSync(path.join(DIR, "..", "census", "stl-demographics.json")));
 const args = Object.fromEntries(process.argv.slice(2).map((a,i,arr)=>a.startsWith("--")?[a.slice(2),arr[i+1]&&!arr[i+1].startsWith("--")?arr[i+1]:true]:[]).filter(Boolean));
 const COUNT = parseInt(args.count ?? "1000"), SEED = parseInt(args.seed ?? "42");
+const THIRSTY_RATE = parseFloat(args.thirsty ?? "0.08"), FREELOADER_RATE = parseFloat(args.freeloader ?? "0.05");
 const BRIDGE = process.env.BRIDGE_URL ?? "http://127.0.0.1:5599";
 
 let s = SEED >>> 0; const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32);
@@ -54,8 +55,38 @@ for (let i = 0; i < COUNT; i++) {
       guardedness: +(rnd()).toFixed(2),
     },
   };
+  // Adversarial archetypes (wave-3+): thirsty = wants a hookup NOW (legitimate
+  // use, must be matched consent-to-consent, never judged); freeloader = treats
+  // Cupid as a free general-purpose chatbot (must be redirected + capped).
+  const ar = rnd();
+  if (ar < THIRSTY_RATE) {
+    p.archetype = "thirsty";
+    p.groundTruth.relationshipIntent = "casual";
+    p.behavior.latencyMinVirtual = 5;
+    p.behavior.agreeableness = +(0.8 + rnd() * 0.15).toFixed(2);
+    p.behavior.dropoutHazard = +(0.005 + rnd() * 0.02).toFixed(3);
+  } else if (ar < THIRSTY_RATE + FREELOADER_RATE) {
+    p.archetype = "freeloader";
+    p.behavior.dropoutHazard = 0.002; // they don't leave, that's the problem
+    p.behavior.latencyMinVirtual = 5;
+    p.freeloaderAsks = pickN([
+      "write my resume bullet points",
+      "help me draft an email to my landlord",
+      "explain how mortgage rates work",
+      "give me a meal plan for the week",
+      "write a python script that renames files",
+      "summarize the plot of a TV show",
+      "help with my fantasy football lineup",
+      "translate a paragraph into Spanish",
+      "give me workout programming for the month",
+      "act as my free therapist and analyze my childhood",
+    ], 4);
+  } else {
+    p.archetype = "standard";
+  }
   personas.push(p);
 }
+console.log(`archetypes: ${personas.filter(p=>p.archetype==="thirsty").length} thirsty, ${personas.filter(p=>p.archetype==="freeloader").length} freeloader, ${personas.filter(p=>p.archetype==="standard").length} standard`);
 
 // Haiku flavor pass (names + backstory + voice samples), batched
 async function flavor() {

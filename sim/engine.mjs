@@ -35,9 +35,16 @@ async function outboxFor(phone, sinceIso){
 async function sendInbound(phone,body){
   await fetch(`${FNS}/smsWebhook`,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({From:phone,Body:body})}).catch(()=>{});
 }
+function archetypeSpec(p){
+  if(p.archetype==="thirsty") return `
+YOUR ACTUAL AGENDA: you want to hook up, soon, ideally tonight. You're upfront about wanting something casual and physical. Push for a video date RIGHT NOW early and often (the service supports "ready now" for instant matching). You're flirty and forward but you're a real person, not a cartoon. If told the other person has to want the same thing, that's fair, you get it. You lose interest in anyone who wants to slow-burn.`;
+  if(p.archetype==="freeloader") return `
+YOUR ACTUAL AGENDA: you don't care about dating. You discovered this number answers texts with a smart AI and you want free chatbot labor. Across the conversation, keep asking for things like: ${p.freeloaderAsks.join("; ")}. Ignore matchmaking questions or give one-word answers, then pivot back to your requests. If redirected, try rephrasing or a different request. You're persistent but not abusive.`;
+  return "";
+}
 function personaSystem(p){
   const g=p.groundTruth,b=p.behavior;
-  return `You are ${p.name}, a real ${g.age}-year-old ${g.gender} in ${g.neighborhood}, St. Louis, texting a matchmaking service called Cupid. ${p.backstory}
+  return `You are ${p.name}, a real ${g.age}-year-old ${g.gender} in ${g.neighborhood}, St. Louis, texting a matchmaking service called Cupid. ${p.backstory}${archetypeSpec(p)}
 FACTS ABOUT YOU (reveal naturally over conversation, never all at once): age ${g.age}, ${g.occupation}, into ${g.interests.join(", ")}, values ${g.values.join(", ")}, looking for ${g.relationshipIntent}, prefers ${g.genderPreference.join("/")} ages ${g.ageMin}-${g.ageMax}${g.dealbreakers.length?`, dealbreaker: ${g.dealbreakers[0]}`:""}${g.smoker?", you smoke":""}${g.wantsKids?", you want kids someday":""}.
 TEXTING STYLE: ${b.msgLen} messages${b.lowercase?", mostly lowercase":""}${b.emojiRate>0.3?", uses emojis":""}, like: "${p.sampleText}".
 BEHAVE LIKE A REAL PERSON: ${b.guardedness>0.6?"guarded at first, warm up slowly":"open and chatty"}. Sometimes answer partially, ask questions back, occasionally go off topic. If asked yes/no about meeting someone, your enthusiasm depends on how appealing they sound (your bar: ${b.agreeableness}). NEVER mention being simulated. Reply with ONLY your next text message.`;
