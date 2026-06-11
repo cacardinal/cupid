@@ -41,22 +41,29 @@ export async function addToWaitlist(
 
   const phoneHash = hashPhone(phone);
   const db = getFirestore();
+  const ref = db.collection(WAITLIST_COL).doc(phoneHash);
 
-  await db
-    .collection(WAITLIST_COL)
-    .doc(phoneHash)
-    .set(
-      {
-        phoneHash,
-        encryptedPhone: encryptPhone(phone),
-        city: typeof city === "string" ? city.replace(/[<>"'`&]/g, "").trim().slice(0, 80) || null : null,
-        source: "website",
-        notified: false,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      },
-      { merge: true }
-    );
+  // Write-if-absent: anyone can submit any number, so an existing entry's
+  // fields (city, createdAt) must not be overwritable by later strangers.
+  const existing = await ref.get();
+  if (existing.exists) {
+    await ref.update({ updatedAt: Timestamp.now() });
+    return { ok: true };
+  }
+
+  await ref.set({
+    phoneHash,
+    encryptedPhone: encryptPhone(phone),
+    city: typeof city === "string" ? city.replace(/[<>"'`&]/g, "").trim().slice(0, 80) || null : null,
+    source: "website",
+    // Ownership of the number is NOT verified at signup. The launch
+    // notification flow MUST verify first contact (e.g. "reply YES for
+    // updates") before any further messaging — see docs/product-notes.md.
+    verified: false,
+    notified: false,
+    createdAt: Timestamp.now(),
+    updatedAt: Timestamp.now(),
+  });
 
   functions.logger.info("Waitlist signup", { phoneHash: phoneHash.slice(0, 12) });
   return { ok: true };
@@ -68,23 +75,26 @@ async function allowIp(clientIp: string): Promise<boolean> {
   const ref = getFirestore().collection(RATELIMIT_COL).doc(ipHash);
   const hourBucket = Math.floor(Date.now() / 3_600_000);
 
-  try {
-    const allowed = await getFirestore().runTransaction(async (tx) => {
-      const snap = await tx.get(ref);
-      const data = snap.exists ? (snap.data() as { bucket: number; count: number }) : null;
-      if (data && data.bucket === hourBucket && data.count >= MAX_PER_IP_PER_HOUR) {
-        return false;
-      }
-      if (data && data.bucket === hourBucket) {
-        tx.update(ref, { count: FieldValue.increment(1) });
-      } else {
-        tx.set(ref, { bucket: hourBucket, count: 1 });
-      }
-      return true;
-    });
-    return allowed;
-  } catch (err) {
-    functions.logger.error("Rate limit transaction failed (allowing)", err);
-    return true; // fail-open: a broken limiter shouldn't block real signups
+  // Bounded retry, then FAIL CLOSED — a broken limiter must not become an
+  // open door for bulk enrollment of strangers' phone numbers.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await getFirestore().runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        const data = snap.exists ? (snap.data() as { bucket: number; count: number }) : null;
+        if (data && data.bucket === hourBucket && data.count >= MAX_PER_IP_PER_HOUR) {
+          return false;
+        }
+        if (data && data.bucket === hourBucket) {
+          tx.update(ref, { count: FieldValue.increment(1) });
+        } else {
+          tx.set(ref, { bucket: hourBucket, count: 1 });
+        }
+        return true;
+      });
+    } catch (err) {
+      functions.logger.error(`Rate limit transaction failed (attempt ${attempt + 1})`, err);
+    }
   }
+  return false;
 }

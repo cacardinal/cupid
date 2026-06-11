@@ -248,8 +248,15 @@ export const waitlistSignup = functions
     const { addToWaitlist } = await import("./services/waitlist");
     const phone = String(req.body?.phone ?? "");
     const city = req.body?.city ? String(req.body.city) : undefined;
-    const ip =
-      (req.header("x-forwarded-for") ?? "").split(",")[0].trim() || req.ip || "unknown";
+
+    // Client IP for rate limiting: the FIRST X-Forwarded-For entry is
+    // client-controllable (trivial limit bypass). Google's load balancer
+    // appends the true client IP as the second-to-last entry — use that.
+    const xff = (req.header("x-forwarded-for") ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const ip = (xff.length >= 2 ? xff[xff.length - 2] : xff[0]) || req.ip || "unknown";
 
     const result = await addToWaitlist(phone, ip, city);
     res.status(result.ok ? 200 : 400).json(result);
