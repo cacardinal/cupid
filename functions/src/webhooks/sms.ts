@@ -85,6 +85,35 @@ export async function handleInboundSms(req: Request, res: Response): Promise<voi
       }
     }
 
+    // ── BEGIN campaign-codes wiring ───────────────────────────────────────────
+    // Campaign codes (e.g. TEXTCUPID) work on ANY message, not just the first.
+    // On success, Cupid confirms in one short SMS before the normal reply.
+    try {
+      const { detectCampaignCode, redeemCampaignCode, buildCampaignConfirmation } =
+        await import("../services/campaignCodes");
+      const campaignCode = await detectCampaignCode(body);
+      if (campaignCode) {
+        const redemption = await redeemCampaignCode(campaignCode, phoneHash);
+        if (redemption.redeemed) {
+          // Refresh in-memory profile so downstream sees the updated credits
+          profile = {
+            ...profile,
+            creditsRemaining: (profile.creditsRemaining ?? 1) + redemption.creditsAwarded,
+          };
+          await sendSms(from, buildCampaignConfirmation(campaignCode, redemption.creditsAwarded));
+          functions.logger.info("Campaign code redeemed", {
+            code: campaignCode,
+            user: phoneHash.slice(0, 8),
+            creditsAwarded: redemption.creditsAwarded,
+          });
+        }
+      }
+    } catch (campaignErr) {
+      // Never let campaign-code handling break the main SMS flow
+      functions.logger.error("Campaign code handling failed", campaignErr);
+    }
+    // ── END campaign-codes wiring ─────────────────────────────────────────────
+
     // ── Live mode routing (onboarded users only) ──────────────────────────────
 
     if (profile.onboardingComplete) {

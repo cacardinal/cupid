@@ -232,6 +232,23 @@ export const demoAdmin = functions
         return;
       }
 
+      if (action === "createCampaignCode") {
+        const { createCampaignCode } = await import("./services/campaignCodes");
+        const code = String(req.body?.code ?? "");
+        const credits = req.body?.credits !== undefined ? Number(req.body.credits) : undefined;
+        const maxRedemptions =
+          req.body?.maxRedemptions !== undefined && req.body?.maxRedemptions !== null
+            ? Number(req.body.maxRedemptions)
+            : null;
+        if (!code) {
+          res.status(400).json({ error: "code is required" });
+          return;
+        }
+        const campaignCode = await createCampaignCode(code, credits, maxRedemptions);
+        res.status(200).json({ ok: true, action, campaignCode });
+        return;
+      }
+
       res.status(400).json({ error: `Unknown action: ${action}` });
     } catch (err) {
       functions.logger.error("demoAdmin error", { action, err });
