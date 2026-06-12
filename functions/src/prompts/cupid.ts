@@ -156,9 +156,27 @@ Keep the message short and conversational.
 ${PROFILE_EXTRACTION_INSTRUCTIONS}`;
 }
 
+// Defensive coercion. The profile_update extraction occasionally returns a
+// scalar or comma-string ("hiking, biking") where an array field is expected.
+// buildProfileSummary runs on EVERY conversation turn, so a non-array value
+// here threw "x.join is not a function" and broke the entire SMS reply, which
+// was the root cause of the wave 1-4 funnel collapse (every turn after the
+// first interest was captured returned the error fallback). mergeProfileUpdates
+// now coerces at write time; this guards the read path as belt-and-suspenders.
+function toList(v: unknown): string[] {
+  if (Array.isArray(v)) return v.map((x) => String(x)).filter(Boolean);
+  if (typeof v === "string" && v.trim()) {
+    return v.split(/[,;]+/).map((s) => s.trim()).filter(Boolean);
+  }
+  return [];
+}
+
 function buildProfileSummary(profile: UserProfile): string {
   const parts: string[] = [];
   const { demographics, preferences, personality } = profile;
+  const interests = toList(personality.interests);
+  const values = toList(personality.values);
+  const dealbreakers = toList(preferences.dealbreakers);
 
   if (demographics.age) parts.push(`Age ${demographics.age}`);
   if (demographics.gender) parts.push(demographics.gender);
@@ -166,9 +184,9 @@ function buildProfileSummary(profile: UserProfile): string {
   if (demographics.orientation) parts.push(demographics.orientation);
   if (preferences.relationshipIntent) parts.push(`seeking ${preferences.relationshipIntent}`);
   if (personality.occupation) parts.push(personality.occupation);
-  if (personality.interests?.length) parts.push(`into: ${personality.interests.join(", ")}`);
-  if (personality.values?.length) parts.push(`values: ${personality.values.join(", ")}`);
-  if (preferences.dealbreakers?.length) parts.push(`dealbreakers: ${preferences.dealbreakers.join(", ")}`);
+  if (interests.length) parts.push(`into: ${interests.join(", ")}`);
+  if (values.length) parts.push(`values: ${values.join(", ")}`);
+  if (dealbreakers.length) parts.push(`dealbreakers: ${dealbreakers.join(", ")}`);
 
   return parts.join(", ") || "No profile data yet";
 }
@@ -181,11 +199,13 @@ export function buildMatchDescription(profile: UserProfile): string {
   if (demographics.city) parts.push(`in ${demographics.city}`);
   if (preferences.relationshipIntent) parts.push(`looking for ${preferences.relationshipIntent}`);
   if (personality.humorStyle) parts.push(`${personality.humorStyle} sense of humor`);
-  if (personality.interests?.length) {
-    parts.push(`loves ${personality.interests.slice(0, 3).join(" and ")}`);
+  const interests = toList(personality.interests);
+  const values = toList(personality.values);
+  if (interests.length) {
+    parts.push(`loves ${interests.slice(0, 3).join(" and ")}`);
   }
-  if (personality.values?.length) {
-    parts.push(`values ${personality.values.slice(0, 2).join(" and ")}`);
+  if (values.length) {
+    parts.push(`values ${values.slice(0, 2).join(" and ")}`);
   }
 
   return parts.join(", ");

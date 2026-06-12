@@ -230,6 +230,31 @@ function parseClaudeResponse(rawText: string): ClaudeResponse {
 
 // ─── Profile merge helper ─────────────────────────────────────────────────────
 
+// Fields typed as arrays in UserProfile. The model intermittently emits these
+// as a scalar or comma-string ("hiking, biking") in a profile_update block,
+// which later threw "x.join is not a function" in buildProfileSummary and broke
+// every subsequent SMS turn (wave 1-4 funnel root cause). Coerce to an array
+// at the write boundary so stored data is always correctly typed.
+const ARRAY_PROFILE_FIELDS = new Set([
+  "genderPreference",
+  "dealbreakers",
+  "values",
+  "interests",
+  "personalityTraits",
+]);
+
+function coerceArrayField(key: string, value: unknown): unknown {
+  if (!ARRAY_PROFILE_FIELDS.has(key)) return value;
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    return value
+      .split(/[,;]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  return [value];
+}
+
 export function mergeProfileUpdates(
   profile: UserProfile,
   updates: Record<string, unknown> | null
@@ -253,7 +278,7 @@ export function mergeProfileUpdates(
     merged.preferences = { ...profile.preferences };
     for (const [k, v] of Object.entries(prefs)) {
       if (v !== null && v !== undefined) {
-        (merged.preferences as Record<string, unknown>)[k] = sanitizeProfileValue(v);
+        (merged.preferences as Record<string, unknown>)[k] = sanitizeProfileValue(coerceArrayField(k, v));
       }
     }
   }
@@ -263,7 +288,7 @@ export function mergeProfileUpdates(
     merged.personality = { ...profile.personality };
     for (const [k, v] of Object.entries(pers)) {
       if (v !== null && v !== undefined) {
-        (merged.personality as Record<string, unknown>)[k] = sanitizeProfileValue(v);
+        (merged.personality as Record<string, unknown>)[k] = sanitizeProfileValue(coerceArrayField(k, v));
       }
     }
   }

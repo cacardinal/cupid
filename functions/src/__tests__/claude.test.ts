@@ -72,6 +72,21 @@ describe("mergeProfileUpdates", () => {
     expect(merged.preferences?.dealbreakers).toEqual(["smoker", "no kids"]);
   });
 
+  // Regression: wave 1-4 funnel root cause. The model sometimes emits an array
+  // field as a comma-string ("hiking, biking") or bare scalar. That value later
+  // hit `.join()` in buildProfileSummary and threw on every subsequent turn,
+  // returning the error fallback and stalling onboarding. Coerce to an array.
+  test("coerces string array-fields to arrays (interests, values, dealbreakers)", () => {
+    const profile = baseProfile();
+    const merged = mergeProfileUpdates(profile, {
+      personality: { interests: "hiking, biking, cooking", values: "honesty" },
+      preferences: { dealbreakers: "smoking; heavy drinking" },
+    });
+    expect(merged.personality?.interests).toEqual(["hiking", "biking", "cooking"]);
+    expect(merged.personality?.values).toEqual(["honesty"]);
+    expect(merged.preferences?.dealbreakers).toEqual(["smoking", "heavy drinking"]);
+  });
+
   test("updates onboarding stage", () => {
     const profile = baseProfile();
     const updates = { onboardingStage: "personality" };
