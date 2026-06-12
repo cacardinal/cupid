@@ -78,8 +78,13 @@ export async function generateConversationReply(
   ];
 
   const response = await createCompletion({
+    // 1024 so the visible reply and the trailing <profile_update> JSON block
+    // both fit. At 512 a longer reply consumed the budget before the JSON,
+    // truncating the question mid-word (wave 2/3 judge flagged cut-off
+    // onboarding questions, which stall the funnel). Output is billed by
+    // tokens actually emitted, so the headroom is free unless used.
     model: MODEL,
-    max_tokens: 512,
+    max_tokens: 1024,
     system: systemPrompt,
     messages,
   });
