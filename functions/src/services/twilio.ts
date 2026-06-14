@@ -1,5 +1,6 @@
 import twilio from "twilio";
 import { track } from "./analytics";
+import { logAbuseEvent, SYSTEM_ACTOR } from "./abuseLog";
 
 let _client: twilio.Twilio | null = null;
 
@@ -35,7 +36,22 @@ export async function sendSms(to: string, rawBody: string, opts: SendOptions = {
   // Anti-phishing: strip non-allowlisted URLs and phone numbers. Deterministic,
   // covers prompt-injection-via-profile reaching another user's messages.
   const { scrubOutbound } = await import("./outboundSecurity");
-  const body = scrubOutbound(dashed, opts.allowPhones).body;
+  const scrub = scrubOutbound(dashed, opts.allowPhones);
+  const body = scrub.body;
+  // SITE 2: outbound allowlist telemetry. Attributed to the SYSTEM sentinel,
+  // never to `to`. The recipient is not the author of scrubbed content (the
+  // scrubbed text is usually model output or a partner-facing system message),
+  // so attributing to `to` would flag victims/bystanders. Actor-attributed
+  // contact-share signals are emitted on the INBOUND path (see webhooks/sms.ts).
+  if (scrub.removedUrls.length || scrub.removedPhones.length) {
+    void logAbuseEvent({
+      phoneHash: SYSTEM_ACTOR,
+      type: "contact_scrub",
+      severity: "low",
+      evidence: `stripped ${scrub.removedUrls.length} url ${scrub.removedPhones.length} phone`,
+      source: "outboundAllowlist",
+    });
+  }
   void track("message_sent", to, { length: body.length }); // analytics: `to` is hashed inside track, never sent raw
   // Demo mode: write to Firestore outbox instead of hitting Twilio.
   // Lets the local demo harness render outbound messages as chat bubbles.

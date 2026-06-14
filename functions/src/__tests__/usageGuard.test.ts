@@ -5,6 +5,12 @@ jest.mock("../services/firestore", () => ({
   updateUser: (...args: unknown[]) => mockUpdateUser(...args),
 }));
 
+const mockLogAbuseEvent = jest.fn();
+jest.mock("../services/abuseLog", () => ({
+  logAbuseEvent: (...args: unknown[]) => mockLogAbuseEvent(...args),
+  SYSTEM_ACTOR: "system",
+}));
+
 import {
   checkDailyTurnCap,
   ctDateString,
@@ -19,7 +25,10 @@ function profileWith(over: Partial<UserProfile>): UserProfile {
   return { phoneHash: "abc123", ...over } as UserProfile;
 }
 
-beforeEach(() => mockUpdateUser.mockReset().mockResolvedValue(undefined));
+beforeEach(() => {
+  mockUpdateUser.mockReset().mockResolvedValue(undefined);
+  mockLogAbuseEvent.mockReset();
+});
 
 describe("ctDateString", () => {
   test("converts UTC to CT date", () => {
@@ -80,6 +89,29 @@ describe("checkDailyTurnCap", () => {
       NOW
     );
     expect(d.allowed).toBe(true);
+  });
+
+  test("SITE 1: emits daily_cap_breach once when over cap", async () => {
+    await checkDailyTurnCap(
+      profileWith({ dailyTurnDate: TODAY, dailyTurnCount: DAILY_TURN_CAP }),
+      NOW
+    );
+    expect(mockLogAbuseEvent).toHaveBeenCalledTimes(1);
+    expect(mockLogAbuseEvent).toHaveBeenCalledWith({
+      phoneHash: "abc123",
+      type: "daily_cap_breach",
+      severity: "medium",
+      evidence: `turn ${DAILY_TURN_CAP + 1} over ${DAILY_TURN_CAP}`,
+      source: "usageGuard",
+    });
+  });
+
+  test("SITE 1: does NOT emit when under cap", async () => {
+    await checkDailyTurnCap(
+      profileWith({ dailyTurnDate: TODAY, dailyTurnCount: DAILY_TURN_CAP - 1 }),
+      NOW
+    );
+    expect(mockLogAbuseEvent).not.toHaveBeenCalled();
   });
 
   test("cap notice obeys voice rules", () => {

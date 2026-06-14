@@ -28,13 +28,20 @@ import { setUserLive, setUserOffline } from "../services/liveMatching";
 import { UserProfile } from "../models/user";
 import { extractReferralCode, processReferral, buildShareMessage } from "../services/referral";
 import { track } from "../services/analytics"; // analytics: all calls below are `void track(...)` fire-and-forget
+import { logAbuseEvent } from "../services/abuseLog"; // abuse signals: all calls below are `void logAbuseEvent(...)`
 
 // ─── Main SMS webhook handler ─────────────────────────────────────────────────
 
 export async function handleInboundSms(req: Request, res: Response): Promise<void> {
   // Security gate: reject forged webhooks before reading anything else.
-  const { verifyTwilioRequest, sanitizeInboundBody, hasMedia, MEDIA_DECLINED_MESSAGE } =
-    await import("../services/inboundSecurity");
+  const {
+    verifyTwilioRequest,
+    sanitizeInboundBody,
+    hasMedia,
+    MEDIA_DECLINED_MESSAGE,
+    detectInjection,
+    detectContactShare,
+  } = await import("../services/inboundSecurity");
 
   if (!verifyTwilioRequest(req)) {
     res.status(403).send("Forbidden");
@@ -68,6 +75,33 @@ export async function handleInboundSms(req: Request, res: Response): Promise<voi
     let profile = rawProfile;
     const phoneHash = profile.phoneHash;
     void track("message_received", phoneHash, { isNew, stage: profile.onboardingStage }); // analytics
+
+    // ── Abuse signals on the inbound (actor-attributed) path ──────────────────
+    // Detect on RAW req.body.Body: sanitize strips our tags, so detection must
+    // see the original. The sender is the actor, so phoneHash attribution is
+    // correct. Evidence is a fixed label only, never the matched body.
+    const rawBody: string = req.body?.Body ?? "";
+    if (detectInjection(rawBody)) {
+      // SITE 3
+      void logAbuseEvent({
+        phoneHash,
+        type: "injection_attempt",
+        severity: "high",
+        evidence: "inbound injection heuristic matched",
+        source: "inboundSecurity",
+      });
+    }
+    if (detectContactShare(rawBody)) {
+      // B1 fix: real actor-attributed contact_scrub. The user put a contact
+      // vector in their own message, so the sender is the author.
+      void logAbuseEvent({
+        phoneHash,
+        type: "contact_scrub",
+        severity: "high",
+        evidence: "inbound contact vector",
+        source: "inboundSecurity",
+      });
+    }
 
     // ── Referral detection (new users only) ──────────────────────────────────
 
@@ -224,6 +258,32 @@ async function handleConversationTurn(
     return; // over cap: no model call; silent after the one notice
   }
   // ── End daily turn cap ────────────────────────────────────────────────────────
+
+  // ── SITE 4: off-mission / freeloader signal (best-effort, fully guarded) ──────
+  // Emits only on the 2nd+ off-mission message in a CT day so a single off-topic
+  // aside never flags. Wrapped so a Firestore hiccup can never reject the turn.
+  try {
+    const { detectOffMission } = await import("../services/inboundSecurity");
+    if (detectOffMission(userMessage)) {
+      const { ctDateString } = await import("../services/usageGuard");
+      const today = ctDateString(new Date());
+      const sameDay = profile.offMissionDate === today;
+      const offCount = (sameDay ? profile.offMissionCount ?? 0 : 0) + 1;
+      await updateUser(phoneHash, { offMissionDate: today, offMissionCount: offCount });
+      if (offCount >= 2) {
+        void logAbuseEvent({
+          phoneHash,
+          type: "freeloader",
+          severity: "low",
+          evidence: `off-mission ${offCount} times today`,
+          source: "sms.conversation",
+        });
+      }
+    }
+  } catch (offErr) {
+    functions.logger.error("Off-mission signal failed", offErr);
+  }
+  // ── End SITE 4 ────────────────────────────────────────────────────────────────
 
   const history = await getConversationHistory(phoneHash);
 

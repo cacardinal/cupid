@@ -1,5 +1,6 @@
 import { UserProfile } from "../models/user";
 import { updateUser } from "./firestore";
+import { logAbuseEvent } from "./abuseLog";
 
 // Deterministic cost control for the conversation path. Prompt rules redirect
 // freeloaders; this guard is the hard backstop so a user (or bot) hammering the
@@ -45,6 +46,17 @@ export async function checkDailyTurnCap(
     });
 
     if (!overCap) return { allowed: true };
+
+    // SITE 1: daily cap breach. Fixed-label evidence (count is a small int, not
+    // PII). Fire-and-forget; the surrounding catch already swallows errors.
+    void logAbuseEvent({
+      phoneHash: profile.phoneHash,
+      type: "daily_cap_breach",
+      severity: "medium",
+      evidence: `turn ${count} over ${DAILY_TURN_CAP}`,
+      source: "usageGuard",
+    });
+
     return { allowed: false, sendNotice: !noticeSent };
   } catch {
     return { allowed: true };

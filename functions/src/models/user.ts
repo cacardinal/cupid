@@ -71,6 +71,8 @@ export interface UserProfile {
   dailyTurnDate?: string;      // CT date string YYYY-MM-DD
   dailyTurnCount?: number;
   capNoticeDate?: string;      // CT date the over-cap notice was sent
+  offMissionDate?: string;     // CT date string for the off-mission counter
+  offMissionCount?: number;    // off-mission messages seen that CT day
 
   // Referral fields
   referralCode: string;        // "CUP-" + first 6 chars of phoneHash (uppercase)

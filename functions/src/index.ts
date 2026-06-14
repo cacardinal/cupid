@@ -257,6 +257,162 @@ export const demoAdmin = functions
     }
   });
 
+// ─── Admin moderation endpoint (review surface; private dashboard only) ───────
+
+const ADMIN_MOD_ALLOWED_ORIGINS = new Set([
+  "https://textcupid.app",
+  "https://heycupid.app",
+  "https://cupid-dating-mvp.web.app",
+  "http://localhost:5174",
+  "http://192.168.0.194:5174",
+]);
+
+// In-memory per-IP sliding-window rate limiter (B3). NOTE: per-instance only.
+// Cloud Functions scale horizontally, so each warm instance keeps its own
+// window; this is a cheap brute-force speed bump, not a global guarantee. A
+// global limit would need Firestore/Redis. The 32-byte secret makes online
+// brute force infeasible regardless; this caps obvious hammering per instance.
+const ADMIN_RL_MAX = 10; // requests
+const ADMIN_RL_WINDOW_MS = 60_000; // per 60s per IP
+const adminRlHits = new Map<string, number[]>();
+
+function adminRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const cutoff = now - ADMIN_RL_WINDOW_MS;
+  const hits = (adminRlHits.get(ip) ?? []).filter((t) => t > cutoff);
+  hits.push(now);
+  adminRlHits.set(ip, hits);
+  return hits.length > ADMIN_RL_MAX;
+}
+
+export const adminModeration = functions
+  .runWith({ timeoutSeconds: 30, memory: "256MB", secrets: ["ADMIN_API_SECRET"] })
+  .https.onRequest(async (req, res) => {
+    const origin = req.header("Origin") ?? "";
+    if (ADMIN_MOD_ALLOWED_ORIGINS.has(origin)) {
+      res.set("Access-Control-Allow-Origin", origin);
+      res.set("Vary", "Origin");
+    }
+    res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type, X-Admin-Secret");
+
+    if (req.method === "OPTIONS") {
+      res.status(204).send("");
+      return;
+    }
+
+    // Client IP (Google's LB appends the true client as the second-to-last XFF
+    // entry; the first entry is client-controllable).
+    const xff = (req.header("x-forwarded-for") ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const ip = (xff.length >= 2 ? xff[xff.length - 2] : xff[0]) || req.ip || "unknown";
+
+    if (adminRateLimited(ip)) {
+      res.status(429).json({ ok: false, error: "Too Many Requests" });
+      return;
+    }
+
+    const { isAuthorizedAdmin, ADMIN_SECRET_HEADER } = await import("./services/adminAuth");
+    if (!isAuthorizedAdmin(req.header(ADMIN_SECRET_HEADER))) {
+      // B3: surface repeated auth failures in the same abuse pipeline.
+      functions.logger.warn("adminModeration auth fail", { ip });
+      const { logAbuseEvent } = await import("./services/abuseLog");
+      void logAbuseEvent({
+        phoneHash: "system",
+        type: "other",
+        severity: "medium",
+        evidence: "admin auth failure",
+        source: "adminModeration",
+      });
+      res.status(401).json({ ok: false, error: "Unauthorized" });
+      return;
+    }
+
+    try {
+      const { listModerationFlags, resolveModerationFlag, upsertModerationFlag } =
+        await import("./services/moderation");
+      const VALID_SEVERITY = new Set(["low", "medium", "high"]);
+      const VALID_TYPES = new Set([
+        "daily_cap_breach",
+        "contact_scrub",
+        "injection_attempt",
+        "freeloader",
+        "concierge_decline",
+        "other",
+      ]);
+
+      if (req.method === "GET") {
+        const statusRaw = String(req.query.status ?? "open");
+        const status =
+          statusRaw === "resolved" || statusRaw === "all" || statusRaw === "open"
+            ? (statusRaw as "open" | "resolved" | "all")
+            : "open";
+        const limit = req.query.limit !== undefined ? Number(req.query.limit) : undefined;
+        const flags = await listModerationFlags({ status, limit });
+        res.status(200).json({ ok: true, flags });
+        return;
+      }
+
+      if (req.method === "POST") {
+        const flagId = String(req.body?.flagId ?? "");
+
+        // Create/merge path: the triage agent posts a clustered flag with a
+        // phoneHash and no flagId. Validates the enum/severity it controls.
+        if (!flagId && req.body?.phoneHash) {
+          const severity = String(req.body.severity ?? "");
+          if (!VALID_SEVERITY.has(severity)) {
+            res.status(400).json({ ok: false, error: "invalid severity" });
+            return;
+          }
+          const types = (Array.isArray(req.body.types) ? req.body.types : [])
+            .map((t: unknown) => String(t))
+            .filter((t: string) => VALID_TYPES.has(t));
+          const evidence = (Array.isArray(req.body.evidence) ? req.body.evidence : [])
+            .map((e: unknown) => String(e));
+          const flag = await upsertModerationFlag({
+            phoneHash: String(req.body.phoneHash),
+            types: types as never,
+            severity: severity as never,
+            eventCount: Number(req.body.eventCount ?? 0),
+            evidence,
+          });
+          res.status(200).json({ ok: true, flag });
+          return;
+        }
+
+        if (!flagId) {
+          res.status(400).json({ ok: false, error: "flagId or phoneHash is required" });
+          return;
+        }
+        const status = req.body?.status !== undefined ? String(req.body.status) : undefined;
+        const notes = req.body?.notes !== undefined ? String(req.body.notes) : undefined;
+        if (status === undefined && notes === undefined) {
+          res.status(400).json({ ok: false, error: "status or notes is required" });
+          return;
+        }
+        const result = await resolveModerationFlag(flagId, {
+          status: status as "open" | "resolved" | undefined,
+          notes,
+          resolvedBy: "founder",
+        });
+        if (!result.ok) {
+          const code = result.reason === "not_found" ? 404 : 400;
+          res.status(code).json({ ok: false, error: result.reason });
+          return;
+        }
+        res.status(200).json({ ok: true, flag: result.flag });
+        return;
+      }
+
+      res.status(405).json({ ok: false, error: "Method Not Allowed" });
+    } catch (err) {
+      functions.logger.error("adminModeration error", { method: req.method, err });
+      res.status(500).json({ ok: false, error: "Internal error" });
+    }
+  });
+
 // ─── Waitlist signup (website form) ──────────────────────────────────────────
 
 const WAITLIST_ALLOWED_ORIGINS = new Set([

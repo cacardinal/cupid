@@ -77,6 +77,45 @@ export function sanitizeInboundBody(raw: string): string {
   return s;
 }
 
+// ─── Abuse-signal detectors (read-only; never mutate or log the body) ──────────
+//
+// These read RAW inbound text to decide whether to emit an abuse signal. They
+// never log the matched body and never place body content in evidence (callers
+// emit fixed-label evidence only). Sanitization is separate (above): detectors
+// run on raw input so a stripped tag still registers as an injection attempt.
+
+// Structural-tag injection (reuses the exact literal sanitizeInboundBody strips)
+// plus anchored jailbreak phrasing. Kept narrow to avoid flagging normal dating
+// chat. Case-insensitive.
+const INJECTION_PHRASE_RE =
+  /<\/?profile_update>|ignore (?:all |the )?(?:previous|prior|above) (?:instructions|prompts?)|disregard (?:all |the )?(?:previous|prior|above)|you are (?:now )?(?:a|an|in) (?:developer|dev|debug|admin|jailbreak)|system prompt|reveal (?:your )?(?:instructions|system prompt|prompt)/i;
+
+export function detectInjection(raw: string): boolean {
+  return INJECTION_PHRASE_RE.test(raw ?? "");
+}
+
+// Off-mission / freeloader proxy: the user is treating Cupid as a general
+// assistant rather than a matchmaker. Heuristic, intentionally conservative.
+const OFF_MISSION_RE =
+  /\b(write|generate|create|give me|compose) (me )?(a |an |some )?(essay|poem|code|script|function|program|story|recipe|email|sql|python|javascript)\b|\b(solve|calculate|compute) (this|the|my)\b|\bhomework\b|\btranslate (this|the following)\b|\bact as (?:a |an |my |your )?(?!matchmaker|wingman)(?:chatgpt|assistant|ai|bot|model|developer|expert)\b/i;
+
+export function detectOffMission(body: string): boolean {
+  return OFF_MISSION_RE.test(body ?? "");
+}
+
+// Contact-share vector on the INBOUND path: a URL or a phone-shaped string in
+// the user's own message. The SENDER is the actor, so an emit keyed on the
+// sender's phoneHash is correctly attributed (the B1 fix for contact_scrub).
+const INBOUND_URL_RE =
+  /\bhttps?:\/\/\S+|\bwww\.[a-z0-9-]+\.[a-z]{2,}|\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:com|net|org|app|io|co|me|info|biz|xyz)\b/i;
+const INBOUND_PHONE_RE =
+  /(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}|\+1\d{10}/;
+
+export function detectContactShare(raw: string): boolean {
+  const s = raw ?? "";
+  return INBOUND_URL_RE.test(s) || INBOUND_PHONE_RE.test(s);
+}
+
 /** True if the inbound Twilio payload carries media attachments (MMS). */
 export function hasMedia(body: Record<string, unknown>): boolean {
   const n = parseInt(String(body?.NumMedia ?? "0"), 10);

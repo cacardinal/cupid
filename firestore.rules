@@ -16,6 +16,14 @@ service cloud.firestore {
       }
     }
 
+    // Abuse-review collections — admin SDK only, no client access ever.
+    match /abuse_events/{eventId} {
+      allow read, write: if false;
+    }
+    match /moderation_flags/{flagId} {
+      allow read, write: if false;
+    }
+
     // All access is via Cloud Functions with admin SDK
     // This is intentional — no client-side access to PII
   }
