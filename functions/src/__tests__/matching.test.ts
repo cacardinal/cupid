@@ -3,6 +3,7 @@ import { UserProfile } from "../models/user";
 import {
   computeCompatibility,
   findTopMatches,
+  locationMatch,
   CompatibilityResult,
 } from "../scheduler/matchingJob";
 
@@ -226,6 +227,125 @@ describe("computeCompatibility", () => {
     const resultDiffHumor = computeCompatibility(alice, bobDifferentHumor);
 
     expect(resultSameHumor.score).toBeGreaterThanOrEqual(resultDiffHumor.score);
+  });
+});
+
+// ─── blockingFilter + softGaps + cross-city openness ──────────────────────────
+
+describe("blockingFilter", () => {
+  test("gender mismatch sets blockingFilter gender", () => {
+    const a = makeUser({
+      phoneHash: "g_a",
+      demographics: { age: 30, gender: "woman", city: "st. louis" },
+      preferences: { genderPreference: ["woman"], dealbreakers: [] },
+    });
+    const b = makeUser({
+      phoneHash: "g_b",
+      demographics: { age: 32, gender: "man", city: "st. louis" },
+      preferences: { genderPreference: ["woman"], dealbreakers: [] },
+    });
+    const r = computeCompatibility(a, b);
+    expect(r.passed).toBe(false);
+    expect(r.blockingFilter).toBe("gender");
+  });
+
+  test("age mismatch sets blockingFilter age", () => {
+    const a = makeUser({
+      phoneHash: "a_a",
+      demographics: { age: 30, gender: "woman", city: "st. louis" },
+      preferences: { ageMin: 35, ageMax: 45, genderPreference: ["man"], dealbreakers: [] },
+    });
+    const b = makeUser({
+      phoneHash: "a_b",
+      demographics: { age: 28, gender: "man", city: "st. louis" },
+      preferences: { ageMin: 25, ageMax: 40, genderPreference: ["woman"], dealbreakers: [] },
+    });
+    const r = computeCompatibility(a, b);
+    expect(r.passed).toBe(false);
+    expect(r.blockingFilter).toBe("age");
+  });
+
+  test("location mismatch sets blockingFilter location", () => {
+    const a = makeUser({
+      phoneHash: "l_a",
+      demographics: { age: 30, gender: "woman", city: "st. louis" },
+      preferences: { genderPreference: ["man"], dealbreakers: [] },
+    });
+    const b = makeUser({
+      phoneHash: "l_b",
+      demographics: { age: 32, gender: "man", city: "chicago" },
+      preferences: { genderPreference: ["woman"], dealbreakers: [] },
+    });
+    const r = computeCompatibility(a, b);
+    expect(r.passed).toBe(false);
+    expect(r.blockingFilter).toBe("location");
+  });
+
+  test("dealbreaker sets blockingFilter dealbreaker", () => {
+    const a = makeUser({
+      phoneHash: "d_a",
+      preferences: { genderPreference: ["man"], dealbreakers: ["doesn't want kids"] },
+    });
+    const b = makeUser({
+      phoneHash: "d_b",
+      demographics: { age: 32, gender: "man", city: "st. louis" },
+      preferences: { genderPreference: ["woman"], dealbreakers: [] },
+      personality: { wantsKids: false },
+    });
+    const r = computeCompatibility(a, b);
+    expect(r.passed).toBe(false);
+    expect(r.blockingFilter).toBe("dealbreaker");
+  });
+});
+
+describe("softGaps", () => {
+  test("present and contains a low dim on a passing-but-thin pair", () => {
+    const a = makeUser({
+      phoneHash: "s_a",
+      demographics: { age: 30, gender: "woman", city: "st. louis" },
+      preferences: { genderPreference: ["man"], relationshipIntent: "long-term", dealbreakers: [] },
+      personality: { interests: ["chess"], values: ["faith"] },
+    });
+    const b = makeUser({
+      phoneHash: "s_b",
+      demographics: { age: 32, gender: "man", city: "st. louis" },
+      preferences: { genderPreference: ["woman"], relationshipIntent: "long-term", dealbreakers: [] },
+      personality: { interests: ["golf"], values: ["ambition"] },
+    });
+    const r = computeCompatibility(a, b);
+    expect(r.passed).toBe(true);
+    expect(r.softGaps).toBeDefined();
+    expect(r.softGaps).toContain("interests");
+    expect(r.softGaps).toContain("values");
+  });
+});
+
+describe("cross-city openness", () => {
+  test("locationMatch passes cross-city when a opened to b's city", () => {
+    const a = makeUser({
+      phoneHash: "o_a",
+      demographics: { city: "st. louis" },
+      preferences: { locationOpenCities: ["kansas city"] },
+    });
+    const b = makeUser({ phoneHash: "o_b", demographics: { city: "kansas city" } });
+    expect(locationMatch(a, b)).toBe(true);
+  });
+
+  test("locationMatch fails (blockingFilter location) when neither side opened", () => {
+    const a = makeUser({
+      phoneHash: "o_a2",
+      demographics: { age: 30, gender: "woman", city: "st. louis" },
+      preferences: { genderPreference: ["man"], dealbreakers: [] },
+    });
+    const b = makeUser({
+      phoneHash: "o_b2",
+      demographics: { age: 32, gender: "man", city: "kansas city" },
+      preferences: { genderPreference: ["woman"], dealbreakers: [] },
+    });
+    expect(locationMatch(a, b)).toBe(false);
+    const r = computeCompatibility(a, b);
+    expect(r.passed).toBe(false);
+    expect(r.blockingFilter).toBe("location");
   });
 });
 

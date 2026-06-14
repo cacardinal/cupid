@@ -23,6 +23,17 @@ export interface Preferences {
   genderPreference?: Gender[];
   relationshipIntent?: RelationshipIntent;
   dealbreakers?: string[];
+  // ── Multi-region openness ──
+  // Raw captured phrase ("a couple hours", "anywhere in Missouri"). Human/debug
+  // context only. The deterministic matcher NEVER parses this for logic.
+  locationOpenness?: string;
+  // Lowercased, trimmed city names the member has been interpreted-open-to (in
+  // addition to their home city). This is the ONLY cross-city field locationMatch
+  // reads. Written only by the engagement review after the model interprets
+  // locationOpenness, so the matcher stays deterministic.
+  locationOpenCities?: string[];
+  // Last time we asked about cross-region openness (re-ask window guard).
+  opennessAskedAt?: Timestamp;
 }
 
 export interface Personality {
@@ -78,6 +89,21 @@ export interface UserProfile {
   referralCode: string;        // "CUP-" + first 6 chars of phoneHash (uppercase)
   referredBy?: string;         // referralCode of the person who referred this user
   referralCount: number;       // How many users this person has successfully referred
+
+  // Proactive engagement (engagement review) — distinct from friend-mode
+  // checkinCount. Used to rate-limit proactive sends and avoid re-asking the
+  // same gap/region within a window.
+  lastProactiveAt?: Timestamp;        // last engagement-review send (any kind)
+  proactiveLog?: ProactiveLogEntry[]; // rolling, trimmed to last ~10 by the review
+}
+
+export type ProactiveKind = "rapport" | "deepen" | "reveal_match";
+
+export interface ProactiveLogEntry {
+  at: Timestamp;
+  kind: ProactiveKind;
+  // what we asked about, so we don't re-ask the same gap/region within a window
+  topic?: string; // e.g. "openness:kansas city" | "gap:values" | "rapport"
 }
 
 export type OnboardingStage =

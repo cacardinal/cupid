@@ -1,6 +1,14 @@
 import { Timestamp } from "firebase-admin/firestore";
-import { buildOnboardingSystemPrompt, buildMatchDescription } from "../prompts/cupid";
+import {
+  buildOnboardingSystemPrompt,
+  buildMatchDescription,
+  buildDecideFollowUpPrompt,
+  buildOpennessInterpretationPrompt,
+  stripDashes,
+} from "../prompts/cupid";
 import { UserProfile } from "../models/user";
+import type { NearMatch } from "../services/nearMatch";
+import type { ProfileGap } from "../services/profileGaps";
 
 function makeProfile(overrides: Partial<UserProfile> = {}): UserProfile {
   return {
@@ -108,5 +116,58 @@ describe("buildMatchDescription", () => {
     });
     const desc = buildMatchDescription(profile);
     expect(desc).toContain("dry");
+  });
+});
+
+describe("buildDecideFollowUpPrompt", () => {
+  const near: NearMatch[] = [
+    {
+      candidate: makeProfile({ phoneHash: "c1" }),
+      softScore: 70,
+      blockingFilter: "location",
+      resolvable: "openness",
+      question: "Would you be open to meeting someone in Kansas City?",
+      topic: "openness:kansas city",
+      revealCity: "Kansas City",
+    },
+  ];
+  const gaps: ProfileGap[] = [
+    { field: "values", question: "What matters most to you?", topic: "gap:values" },
+  ];
+
+  test("contains CUPID_PERSONA and JSON-only instruction", () => {
+    const p = buildDecideFollowUpPrompt(makeProfile(), [], near, gaps);
+    expect(p).toContain("Cupid");
+    expect(p).toContain("matchmaker");
+    expect(p).toContain("followUp");
+    expect(p).toContain("return ONLY a JSON object");
+  });
+
+  test("includes near-match revealCity and gap questions", () => {
+    const p = buildDecideFollowUpPrompt(makeProfile(), [], near, gaps);
+    expect(p).toContain("Kansas City");
+    expect(p).toContain("What matters most to you?");
+  });
+
+  test("forbids dashes and pitch", () => {
+    const p = buildDecideFollowUpPrompt(makeProfile(), [], near, gaps);
+    expect(p.toLowerCase()).toContain("no em-dashes");
+    expect(p.toLowerCase()).toContain("no product pitch");
+  });
+});
+
+describe("buildOpennessInterpretationPrompt", () => {
+  test("asks for a JSON array and lists candidate cities", () => {
+    const p = buildOpennessInterpretationPrompt("I'd drive to KC", "st. louis", ["kansas city", "columbia"]);
+    expect(p).toContain("JSON array");
+    expect(p).toContain("kansas city");
+    expect(p).toContain("columbia");
+  });
+});
+
+describe("stripDashes", () => {
+  test("converts em/en dash to comma-space", () => {
+    expect(stripDashes("warm — specific")).toBe("warm, specific");
+    expect(stripDashes("a–b")).toBe("a, b");
   });
 });

@@ -40,7 +40,7 @@ export function isDueForCheckin(profile: UserProfile, now: Date = new Date()): b
 }
 
 /** Statuses that mean "leave them alone, a match flow is in motion". */
-const BUSY_MATCH_STATUSES = new Set([
+export const BUSY_MATCH_STATUSES = new Set([
   "proposed",
   "user_accepted",
   "scheduling",

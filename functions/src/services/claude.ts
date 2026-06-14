@@ -7,6 +7,7 @@ import {
   buildPostVideoFollowUpPrompt,
   buildMatchDescription,
   buildVoicedMessagePrompt,
+  stripDashes,
 } from "../prompts/cupid";
 
 export const MODEL = "claude-sonnet-4-5";
@@ -173,6 +174,119 @@ export async function generateFriendCheckin(
   return parseClaudeResponse(extractText(response));
 }
 
+// ─── Engagement review: decide whether to reach out ───────────────────────────
+
+import type { NearMatch } from "./nearMatch";
+import type { ProfileGap } from "./profileGaps";
+
+export interface DecideFollowUpResult {
+  followUp: boolean;
+  intent: "rapport" | "deepen" | "reveal_match";
+  message: string;
+  reason: string;
+}
+
+const VALID_INTENTS = new Set(["rapport", "deepen", "reveal_match"]);
+
+/**
+ * Ask the model whether to proactively reach out to this member now. Returns a
+ * strict, validated decision; the model MAY decline. Fail-closed: any model or
+ * parse error returns a decline, never throws. Goes through createCompletion so
+ * the sim bridge path is preserved.
+ */
+export async function decideFollowUp(
+  member: UserProfile,
+  history: ConversationTurn[],
+  nearMatches: NearMatch[],
+  gaps: ProfileGap[]
+): Promise<DecideFollowUpResult> {
+  const decline = (reason: string): DecideFollowUpResult => ({
+    followUp: false,
+    intent: "rapport",
+    message: "",
+    reason,
+  });
+
+  try {
+    const { buildDecideFollowUpPrompt } = await import("../prompts/cupid");
+    const systemPrompt = buildDecideFollowUpPrompt(member, history, nearMatches, gaps);
+    const response = await createCompletion({
+      model: MODEL,
+      max_tokens: 400,
+      system: systemPrompt,
+      messages: [{ role: "user", content: "Make the decision now. Return only the JSON object." }],
+    });
+
+    const raw = extractText(response);
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) return decline("no_json");
+
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(match[0]);
+    } catch {
+      return decline("parse_error");
+    }
+
+    if (parsed.followUp !== true) return decline("model_declined");
+
+    const intent = String(parsed.intent ?? "");
+    if (!VALID_INTENTS.has(intent)) return decline("invalid_intent");
+
+    const message = stripDashes(String(parsed.message ?? "")).trim();
+    if (!message) return decline("empty_message");
+
+    return {
+      followUp: true,
+      intent: intent as DecideFollowUpResult["intent"],
+      message,
+      reason: String(parsed.reason ?? ""),
+    };
+  } catch {
+    return decline("error");
+  }
+}
+
+/**
+ * Interpret a member's free-form openness phrase into a conservative list of
+ * candidate cities they are open to. Intersects with the supplied candidate list
+ * (defensive) and lowercases. Never throws; returns [] on error/uncertainty.
+ */
+export async function interpretOpenness(
+  opennessPhrase: string,
+  homeCity: string,
+  candidateCities: string[]
+): Promise<string[]> {
+  if (!opennessPhrase || candidateCities.length === 0) return [];
+  try {
+    const { buildOpennessInterpretationPrompt } = await import("../prompts/cupid");
+    const allowed = new Set(candidateCities.map((c) => c.toLowerCase().trim()));
+    const systemPrompt = buildOpennessInterpretationPrompt(opennessPhrase, homeCity, candidateCities);
+    const response = await createCompletion({
+      model: MODEL,
+      max_tokens: 120,
+      system: systemPrompt,
+      messages: [{ role: "user", content: "Return only the JSON array." }],
+    });
+
+    const raw = extractText(response);
+    const match = raw.match(/\[[\s\S]*\]/);
+    if (!match) return [];
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(match[0]);
+    } catch {
+      return [];
+    }
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((c) => String(c).toLowerCase().trim())
+      .filter((c) => c && allowed.has(c));
+  } catch {
+    return [];
+  }
+}
+
 // ─── Post-video follow-up ─────────────────────────────────────────────────────
 
 export async function generatePostVideoFollowUp(
@@ -243,13 +357,12 @@ function parseClaudeResponse(rawText: string): ClaudeResponse {
   // Strip profile_update blocks from the visible message — including an
   // UNTERMINATED block (max_tokens truncation can cut off the closing tag,
   // which would otherwise leak raw JSON into the user's SMS).
-  const message = rawText
+  const messageRaw = rawText
     .replace(/<profile_update>[\s\S]*?<\/profile_update>/g, "")
-    .replace(/<profile_update>[\s\S]*$/, "")
-    // Brand rule: no em/en dashes in anything Cupid sends. The prompt forbids
-    // them but models still slip; enforce deterministically (wave-smoke finding).
-    .replace(/\s*[—–]\s*/g, ", ")
-    .trim();
+    .replace(/<profile_update>[\s\S]*$/, "");
+  // Brand rule: no em/en dashes in anything Cupid sends. The prompt forbids
+  // them but models still slip; enforce deterministically (wave-smoke finding).
+  const message = stripDashes(messageRaw).trim();
 
   return { message, profileUpdates, rawResponse: rawText };
 }

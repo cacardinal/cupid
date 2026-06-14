@@ -14,6 +14,26 @@
 import * as fs from "fs";
 import * as path from "path";
 
+// Static assertion (no emulator needed): the rules file locks the new
+// scheduled_messages collection admin-only, mirroring abuse_events /
+// moderation_flags. The full emulator-backed deny test lives in the skipped
+// block below.
+describe("firestore.rules locks scheduled_messages admin-only", () => {
+  const rules = fs.readFileSync(
+    path.join(__dirname, "..", "..", "..", "firestore.rules"),
+    "utf8"
+  );
+
+  test("declares the scheduled_messages match block", () => {
+    expect(rules).toMatch(/match \/scheduled_messages\/\{msgId\}/);
+  });
+
+  test("scheduled_messages denies all client read/write", () => {
+    const block = rules.slice(rules.indexOf("scheduled_messages"));
+    expect(block).toMatch(/allow read, write: if false;/);
+  });
+});
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let testEnv: any;
 

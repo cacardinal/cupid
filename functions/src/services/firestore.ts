@@ -163,6 +163,27 @@ export async function getConversationHistory(
 }
 
 /**
+ * Timestamp of the member's most recent INBOUND (role:"user") turn, or null if
+ * they have never messaged. This is the freshness anchor for proactive sends:
+ * it moves ONLY when the member actually messages, never when bookkeeping writes
+ * bump `updatedAt` (e.g. the engagement review recording its own proactive
+ * trackers). The drainer compares this against the value captured at enqueue
+ * time so a review's own write can't masquerade as a fresh inbound.
+ */
+export async function getLastInboundAt(phoneHash: string): Promise<Timestamp | null> {
+  const snap = await db()
+    .collection(USERS_COL)
+    .doc(phoneHash)
+    .collection(CONVERSATIONS_SUB)
+    .where("role", "==", "user")
+    .orderBy("timestamp", "desc")
+    .limit(1)
+    .get();
+  if (snap.empty) return null;
+  return (snap.docs[0].data() as ConversationTurn).timestamp;
+}
+
+/**
  * Total turns ever stored for a user (count() aggregate — one cheap read,
  * no counter field to maintain or backfill). Used by the narrative memory
  * layer to decide when a summary refresh is due.

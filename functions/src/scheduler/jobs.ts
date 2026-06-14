@@ -147,6 +147,133 @@ export async function attemptInstantMatch(phoneHash: string): Promise<InstantMat
     : { matched: false, reason: "propose_failed" };
 }
 
+// ─── Event-driven re-scoring ──────────────────────────────────────────────────
+
+// Match-affecting fields. A merged profile update that touches any of these is
+// "material" and warrants a re-score; an onboardingStage-only or narrative-only
+// update is not. Used by the webhook to decide whether to fire reassessMatchPool.
+const MATERIAL_PREFERENCE_KEYS = new Set([
+  "ageMin",
+  "ageMax",
+  "genderPreference",
+  "relationshipIntent",
+  "dealbreakers",
+  "locationOpenness",
+]);
+const MATERIAL_PERSONALITY_KEYS = new Set([
+  "values",
+  "interests",
+  "wantsKids",
+  "hasKids",
+]);
+
+/**
+ * True when a merged profile update touches a field that can change matching
+ * outcomes. `updates` is the Partial<UserProfile> produced by mergeProfileUpdates.
+ */
+export function isMaterialChange(updates: Partial<import("../models/user").UserProfile>): boolean {
+  if (!updates) return false;
+  // Any demographics change is material (city, age, gender, orientation).
+  if (updates.demographics && Object.keys(updates.demographics).length > 0) return true;
+  if (updates.preferences) {
+    for (const k of Object.keys(updates.preferences)) {
+      if (MATERIAL_PREFERENCE_KEYS.has(k)) return true;
+    }
+  }
+  if (updates.personality) {
+    for (const k of Object.keys(updates.personality)) {
+      if (MATERIAL_PERSONALITY_KEYS.has(k)) return true;
+    }
+  }
+  return false;
+}
+
+export interface ReassessResult {
+  reassessed: boolean;
+  instantMatched?: boolean;
+  nearMatchCount?: number;
+  openCitiesUpdated?: boolean;
+  reason?: string;
+}
+
+/**
+ * Re-score a single member after a material profile/preference change. Fire-and
+ * -forget from the webhook; never throws to the caller. Interprets any new
+ * locationOpenness into structured locationOpenCities (model, review-time), then
+ * tries an instant match and computes near-matches for telemetry.
+ */
+export async function reassessMatchPool(phoneHash: string): Promise<ReassessResult> {
+  try {
+    const { getUser, getUsersWithoutRecentMatch, updateUser } = await import(
+      "../services/firestore"
+    );
+    const me = await getUser(phoneHash);
+    if (!me || !me.onboardingComplete || me.active === false) {
+      return { reassessed: false, reason: "not_ready" };
+    }
+
+    let openCitiesUpdated = false;
+
+    // (1) Interpret openness prose into structured cities (deterministic matcher
+    // never parses prose). Only when openness is set but cities not yet derived.
+    if (me.preferences.locationOpenness &&
+        (!me.preferences.locationOpenCities || me.preferences.locationOpenCities.length === 0)) {
+      try {
+        const { interpretOpenness } = await import("../services/claude");
+        const pool = await getUsersWithoutRecentMatch(24);
+        const candidateCities = Array.from(
+          new Set(
+            pool
+              .filter((u) => u.phoneHash !== phoneHash)
+              .map((u) => u.demographics.city?.toLowerCase().trim())
+              .filter((c): c is string => !!c)
+          )
+        );
+        const homeCity = me.demographics.city ?? "";
+        const cities = await interpretOpenness(
+          me.preferences.locationOpenness,
+          homeCity,
+          candidateCities.filter((c) => c !== homeCity.toLowerCase().trim())
+        );
+        if (cities.length > 0) {
+          await updateUser(phoneHash, {
+            preferences: { ...me.preferences, locationOpenCities: cities },
+          });
+          me.preferences.locationOpenCities = cities;
+          openCitiesUpdated = true;
+        }
+      } catch (err) {
+        functions.logger.error("Openness interpretation failed", err);
+      }
+    }
+
+    // (2) A freshly-material change may now clear the instant bar.
+    const instant = await attemptInstantMatch(phoneHash);
+
+    // (3) Near-match telemetry (no side effects).
+    let nearMatchCount = 0;
+    try {
+      const { findNearMatches } = await import("../services/nearMatch");
+      const pool = (await getUsersWithoutRecentMatch(24)).filter(
+        (u) => u.phoneHash !== phoneHash
+      );
+      nearMatchCount = findNearMatches(me, pool).length;
+    } catch (err) {
+      functions.logger.error("Near-match telemetry failed", err);
+    }
+
+    return {
+      reassessed: true,
+      instantMatched: instant.matched,
+      nearMatchCount,
+      openCitiesUpdated,
+    };
+  } catch (err) {
+    functions.logger.error("reassessMatchPool failed", err);
+    return { reassessed: false, reason: "error" };
+  }
+}
+
 /**
  * Core nightly matching logic — shared by the scheduled `nightlyMatching`
  * function and the demo-only `demoAdmin?action=runMatching` endpoint.

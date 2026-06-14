@@ -24,6 +24,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Proactive engagement queue — admin SDK only. Written by the engagement
+    // review, drained by the drainer; never any client access.
+    match /scheduled_messages/{msgId} {
+      allow read, write: if false;
+    }
+
     // All access is via Cloud Functions with admin SDK
     // This is intentional — no client-side access to PII
   }

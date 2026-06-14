@@ -1,5 +1,12 @@
 import { UserProfile, OnboardingStage } from "../models/user";
 
+// Brand rule: no em/en dashes in anything Cupid sends. The prompts forbid them
+// but models still slip, so this is the deterministic enforcement shared by
+// parseClaudeResponse and every generator that emits user-visible copy.
+export function stripDashes(s: string): string {
+  return s.replace(/\s*[—–]\s*/g, ", ");
+}
+
 export const CUPID_PERSONA = `You are Cupid, a warm, perceptive, grounded AI matchmaker. Your job is to get to know people through natural conversation and introduce them to compatible partners.
 
 Your personality:
@@ -257,6 +264,91 @@ export function buildMatchDescription(profile: UserProfile): string {
   }
 
   return parts.join(", ");
+}
+
+// ─── Engagement review: decide whether to reach out ───────────────────────────
+
+import type { NearMatch } from "../services/nearMatch";
+import type { ProfileGap } from "../services/profileGaps";
+import type { ConversationTurn } from "../models/user";
+
+/**
+ * The review prompt. The model decides whether to reach out now and returns ONLY
+ * a JSON object {followUp, intent, message, reason}. It may decline. Reveal copy
+ * names a PLACE, never another user's identity or contact.
+ */
+export function buildDecideFollowUpPrompt(
+  member: UserProfile,
+  history: ConversationTurn[],
+  nearMatches: NearMatch[],
+  gaps: ProfileGap[]
+): string {
+  const summary = buildMatchDescription(member) || buildProfileSummary(member);
+  const narrative = member.narrative ? `\nWhat you remember about them: ${member.narrative}` : "";
+  const tail = history
+    .slice(-6)
+    .map((t) => `${t.role}: ${t.content}`)
+    .join("\n");
+
+  const revealMaterial = nearMatches
+    .map((nm) => {
+      const where = nm.revealCity ? ` (they're in ${nm.revealCity})` : "";
+      return `- ${nm.question}${where} [intent: ${nm.resolvable === "openness" ? "reveal_match or deepen" : "deepen"}]`;
+    })
+    .join("\n") || "- (none)";
+
+  const gapMaterial = gaps.map((g) => `- ${g.question}`).join("\n") || "- (none)";
+
+  return `${CUPID_PERSONA}
+
+You are reviewing this member between conversations. Decide whether to reach out right now, like a thoughtful friend would. You may decline (followUp:false), and most reviews should, you only reach out with a real reason and at most a couple times a week.
+
+What you know about them: ${summary}${narrative}
+
+Recent conversation:
+${tail || "(no recent messages)"}
+
+CANDIDATE MATERIAL you may choose from (pick at most ONE thread, never a checklist):
+Near-matches worth a question (a strong fit blocked by one thing they could flex on):
+${revealMaterial}
+Profile gaps worth filling (only if it would unlock a real match):
+${gapMaterial}
+
+THREE INTENTS:
+- rapport: warm, specific, references something they actually said. Same bar as a friend check-in.
+- deepen: weave in ONE targeted question that would unlock a real near-match or fill a decisive gap. Never a checklist, never an interrogation.
+- reveal_match: a strong near-match exists across a region line. Reveal it transparently, name the PLACE, never the person's identity or contact. Something like "I've got someone you'd really click with, they're in {city}, open to that?" Only choose this for a high-confidence location near-match.
+
+CONSTRAINTS:
+- 1 to 2 sentences. Full CUPID_PERSONA voice: no em-dashes or en-dashes, no product pitch, no therapist cliches, no ranking or procurement language, at most one emoji.
+- Never narrate your process or mention searching, scanning, or how matching works.
+- If nothing real to say, decline.
+
+OUTPUT FORMAT: return ONLY a JSON object, no other text, no profile_update block:
+{"followUp": true|false, "intent": "rapport"|"deepen"|"reveal_match", "message": "the SMS body", "reason": "short why, not sent"}
+If followUp is false, set message to "" and reason to why you are holding off.`;
+}
+
+/**
+ * Openness interpreter prompt. Given the member's raw openness phrase, their home
+ * city, and the candidate cities present in the pool, return ONLY a JSON array of
+ * the cities (from the candidate list) the phrase plausibly covers, lowercased.
+ * Conservative: empty array if unclear. Keeps interpretation at review time so
+ * the matcher stays deterministic.
+ */
+export function buildOpennessInterpretationPrompt(
+  opennessPhrase: string,
+  homeCity: string,
+  candidateCities: string[]
+): string {
+  return `A dating member based in ${homeCity || "an unknown city"} said this about how far they would travel or where else they are open to meeting someone: "${opennessPhrase}".
+
+Here are the cities where other members live:
+${candidateCities.map((c) => `- ${c}`).join("\n") || "- (none)"}
+
+Which of those cities does their statement plausibly cover, in addition to their home city? Be conservative: only include a city if their phrase clearly reaches it. If it is unclear, return an empty array.
+
+Return ONLY a JSON array of lowercased city names from the list above, for example ["kansas city"] or []. No other text.`;
 }
 
 // ─── Friend-mode check-in prompt ──────────────────────────────────────────────

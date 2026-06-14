@@ -306,10 +306,11 @@ async function handleConversationTurn(
     timestamp: Timestamp.now(),
   });
 
+  let mergedProfileUpdates: Partial<UserProfile> = {};
   if (result.profileUpdates) {
-    const profileUpdates = mergeProfileUpdates(profile, result.profileUpdates);
-    if (Object.keys(profileUpdates).length > 0) {
-      await updateUser(phoneHash, profileUpdates);
+    mergedProfileUpdates = mergeProfileUpdates(profile, result.profileUpdates);
+    if (Object.keys(mergedProfileUpdates).length > 0) {
+      await updateUser(phoneHash, mergedProfileUpdates);
     }
   }
 
@@ -353,6 +354,22 @@ async function handleConversationTurn(
       .catch((err) => functions.logger.error("Instant match dispatch failed", err));
   }
   // ── End instant matching ──────────────────────────────────────────────────────
+
+  // ── Event-driven re-scoring (fire-and-forget) ─────────────────────────────────
+  // A material profile/preference change (city, age, gender pref, intent,
+  // dealbreakers, openness, key personality) can change matching outcomes, so
+  // re-score this member now instead of waiting for the nightly sweep. Skipped on
+  // the justCompleted turn (onboarding completion already fires attemptInstantMatch
+  // above, so reassess would double-fire). Never blocks the reply.
+  if (!justCompleted) {
+    void import("../scheduler/jobs")
+      .then(({ isMaterialChange, reassessMatchPool }) =>
+        isMaterialChange(mergedProfileUpdates) ? reassessMatchPool(phoneHash) : undefined
+      )
+      .then((r) => { if (r) functions.logger.info("Reassess match pool", r); })
+      .catch((err) => functions.logger.error("Reassess dispatch failed", err));
+  }
+  // ── End event-driven re-scoring ───────────────────────────────────────────────
 }
 
 // ─── Match response handler ───────────────────────────────────────────────────

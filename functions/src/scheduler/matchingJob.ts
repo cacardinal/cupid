@@ -2,11 +2,23 @@ import { UserProfile } from "../models/user";
 
 // ─── Compatibility scoring ────────────────────────────────────────────────────
 
+export type BlockingFilter = "gender" | "age" | "location" | "dealbreaker";
+
 export interface CompatibilityResult {
   score: number;         // 0-100
   passed: boolean;       // false = dealbreaker eliminated pair
   reasons: string[];     // Human-readable reasons (for debugging)
+  // Set ONLY when passed === false; names the SINGLE hard filter that eliminated
+  // the pair. If multiple would fail, the FIRST evaluated wins in this order:
+  // gender, age, location, dealbreaker.
+  blockingFilter?: BlockingFilter;
+  // Set when passed === true: scored-low dimensions whose normalized sub-score
+  // was < 0.4. For near-match question targeting.
+  softGaps?: string[];
 }
+
+// Normalized sub-score threshold below which a passing dimension is a "soft gap".
+const SOFT_GAP_THRESHOLD = 0.4;
 
 export function computeCompatibility(
   a: UserProfile,
@@ -19,51 +31,58 @@ export function computeCompatibility(
 
   // Gender preference check (bidirectional)
   if (!genderPreferenceMatch(a, b) || !genderPreferenceMatch(b, a)) {
-    return { score: 0, passed: false, reasons: ["Gender preference mismatch"] };
+    return { score: 0, passed: false, reasons: ["Gender preference mismatch"], blockingFilter: "gender" };
   }
 
   // Age range check (bidirectional)
   if (!ageRangeMatch(a, b) || !ageRangeMatch(b, a)) {
-    return { score: 0, passed: false, reasons: ["Age range mismatch"] };
+    return { score: 0, passed: false, reasons: ["Age range mismatch"], blockingFilter: "age" };
   }
 
   // Location check
   if (!locationMatch(a, b)) {
-    return { score: 0, passed: false, reasons: ["Location too far"] };
+    return { score: 0, passed: false, reasons: ["Location too far"], blockingFilter: "location" };
   }
 
   // Dealbreaker keyword check
   const dbResult = dealbreakersCheck(a, b);
   if (!dbResult.passed) {
-    return { score: 0, passed: false, reasons: dbResult.reasons };
+    return { score: 0, passed: false, reasons: dbResult.reasons, blockingFilter: "dealbreaker" };
   }
 
   // ── Weighted scoring ─────────────────────────────────────────────────────
+
+  const softGaps: string[] = [];
 
   // Relationship intent alignment (30 pts)
   const intentScore = relationshipIntentScore(a, b);
   score += intentScore * 30;
   if (intentScore > 0.8) reasons.push("Strong relationship intent alignment");
+  if (intentScore < SOFT_GAP_THRESHOLD) softGaps.push("intent");
 
   // Shared interests (25 pts)
   const interestScore = sharedInterestScore(a, b);
   score += interestScore * 25;
   if (interestScore > 0.4) reasons.push(`${Math.round(interestScore * 100)}% interest overlap`);
+  if (interestScore < SOFT_GAP_THRESHOLD) softGaps.push("interests");
 
   // Shared values (25 pts)
   const valueScore = sharedValueScore(a, b);
   score += valueScore * 25;
   if (valueScore > 0.4) reasons.push(`${Math.round(valueScore * 100)}% values alignment`);
+  if (valueScore < SOFT_GAP_THRESHOLD) softGaps.push("values");
 
   // Personality complementarity (20 pts)
   const personalityScore = personalityComplementScore(a, b);
   score += personalityScore * 20;
   if (personalityScore > 0.6) reasons.push("Strong personality complementarity");
+  if (personalityScore < SOFT_GAP_THRESHOLD) softGaps.push("personality");
 
   return {
     score: Math.round(score),
     passed: true,
     reasons,
+    softGaps,
   };
 }
 
@@ -143,12 +162,23 @@ function ageRangeMatch(seeker: UserProfile, candidate: UserProfile): boolean {
   return true;
 }
 
-function locationMatch(a: UserProfile, b: UserProfile): boolean {
-  // MVP: same city is sufficient. Phase 2: lat/lng + radius.
+export function locationMatch(a: UserProfile, b: UserProfile): boolean {
+  // Same city is sufficient (MVP). Cross-city passes only when at least one side
+  // has been interpreted-open-to the other's city (locationOpenCities), keeping
+  // cross-region matching conservative and opt-in. The matcher never parses the
+  // raw openness prose — only the structured locationOpenCities list.
   const cityA = a.demographics.city?.toLowerCase().trim();
   const cityB = b.demographics.city?.toLowerCase().trim();
   if (!cityA || !cityB) return true; // Unknown city passes
-  return cityA === cityB;
+  if (cityA === cityB) return true;
+
+  const aOpenToB = (a.preferences.locationOpenCities ?? [])
+    .map((c) => c.toLowerCase().trim())
+    .includes(cityB);
+  const bOpenToA = (b.preferences.locationOpenCities ?? [])
+    .map((c) => c.toLowerCase().trim())
+    .includes(cityA);
+  return aOpenToB || bOpenToA;
 }
 
 function dealbreakersCheck(

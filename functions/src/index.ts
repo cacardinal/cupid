@@ -233,6 +233,22 @@ export const demoAdmin = functions
         return;
       }
 
+      if (action === "runEngagementReview") {
+        const { runEngagementReview } = await import("./scheduler/engagementReview");
+        const summary = await runEngagementReview();
+        res.status(200).json({ ok: true, action, summary });
+        return;
+      }
+
+      if (action === "drainScheduled") {
+        const { drainScheduledMessages: drainScheduled } = await import(
+          "./scheduler/scheduledMessages"
+        );
+        const summary = await drainScheduled(true);
+        res.status(200).json({ ok: true, action, summary });
+        return;
+      }
+
       if (action === "createCampaignCode") {
         const { createCampaignCode } = await import("./services/campaignCodes");
         const code = String(req.body?.code ?? "");
@@ -473,16 +489,36 @@ export const scheduledDateRunner = functions
     }
   });
 
-// ─── Scheduled: friend-mode check-ins (daily 6pm CT) ────────────────────────
+// ─── Scheduled: nightly engagement review (daily 2:30am CT) ──────────────────
+//
+// Replaces the fixed-cadence friendCheckins. Runs AFTER nightlyMatching (02:00)
+// so reveals reflect that night's matching. Only QUEUES scheduled_messages; the
+// drainer sends them during the member's active hours. (runFriendCheckins is
+// retained for demoAdmin?action=runCheckins back-compat, but no longer scheduled.)
 
-export const friendCheckins = functions
-  .runWith({ timeoutSeconds: 540, memory: "512MB", secrets: ALL_SECRETS })
-  .pubsub.schedule("every day 18:00")
+export const engagementReview = functions
+  .runWith({ timeoutSeconds: 540, memory: "1GB", secrets: ALL_SECRETS })
+  .pubsub.schedule("every day 02:30")
   .timeZone("America/Chicago")
   .onRun(async () => {
-    const { runFriendCheckins } = await import("./scheduler/friendCheckins");
-    const sent = await runFriendCheckins();
-    functions.logger.info("Friend check-ins complete", { sent });
+    const { runEngagementReview } = await import("./scheduler/engagementReview");
+    const summary = await runEngagementReview();
+    functions.logger.info("Engagement review complete", summary);
+  });
+
+// ─── Scheduled: drain the proactive message queue (every 5 min) ──────────────
+
+export const drainScheduledMessages = functions
+  .runWith({ timeoutSeconds: 300, memory: "512MB", secrets: ALL_SECRETS })
+  .pubsub.schedule("every 5 minutes")
+  .onRun(async () => {
+    const { drainScheduledMessages: drainScheduled } = await import(
+      "./scheduler/scheduledMessages"
+    );
+    const summary = await drainScheduled();
+    if (summary.sent || summary.skipped) {
+      functions.logger.info("Scheduled messages drained", summary);
+    }
   });
 
 // ─── Calendar invite (ICS download for scheduled dates) ─────────────────────

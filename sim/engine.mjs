@@ -6,6 +6,11 @@ import fs from "node:fs"; import path from "node:path"; import { fileURLToPath }
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const args = Object.fromEntries(process.argv.slice(2).map((a,i,arr)=>a.startsWith("--")?[a.slice(2),arr[i+1]&&!arr[i+1].startsWith("--")?arr[i+1]:true]:[]).filter(Boolean));
 const USERS=+(args.users??100), VDAYS=+(args.vdays??7), WALL=+(args.wallhours??2), SEED=+(args.seed??42), WAVE=args.wave??"1";
+// Cumulative/append mode: do NOT wipe Firestore (the harness wrapper owns the
+// reset; --append tells it to skip that) and relax the index-0 persona integrity
+// guard so NEW personas using fresh phone indices (e.g. 60+) can run into the
+// existing pool instead of failing the ground-truth check.
+const APPEND = !!(args.append || args.cumulative);
 const RATIO = (VDAYS*24*60) / (WALL*60); // virtual minutes per wall minute
 const FNS="http://127.0.0.1:5001/cupid-dating-mvp/us-central1";
 const FS=`http://127.0.0.1:8080/v1/projects/cupid-dating-mvp/databases/(default)/documents`;
@@ -17,7 +22,17 @@ const pfile=args.personas??path.join(DIR,"personas",`personas-${USERS}.jsonl`);
 const personas=fs.readFileSync(pfile,"utf8").trim().split("\n").map(JSON.parse).slice(0,USERS);
 // Ground-truth integrity guard: phones are index-based, so the file the analyzer
 // reads later MUST be this exact file. Stamp the path so analyze.mjs can verify.
-if(personas[0]?.phone!==`+1314${String(6000000).padStart(7,"0")}`){console.error("FATAL: persona file phone scheme mismatch, refusing to run");process.exit(1);}
+// Ground-truth integrity guard. In the default (full-wave) mode the file MUST
+// start at index 0 so the analyzer reads the exact phone-to-persona mapping. In
+// --append mode we are running NEW personas at higher phone indices (e.g. 60+)
+// into an existing pool, so we relax to a scheme check: every phone must still
+// follow the +1314600XXXX index-based convention, but index 0 need not be present.
+if(APPEND){
+  const bad=personas.find(p=>!/^\+1314600\d{4}$/.test(p.phone??""));
+  if(bad){console.error(`FATAL: append-mode persona phone off-scheme: ${bad.phone}, refusing to run`);process.exit(1);}
+} else if(personas[0]?.phone!==`+1314${String(6000000).padStart(7,"0")}`){
+  console.error("FATAL: persona file phone scheme mismatch, refusing to run");process.exit(1);
+}
 fs.writeFileSync(path.join(DIR,"state",`wave-${WAVE}-personas.txt`),path.resolve(pfile));
 
 // Launch curve: 50% arrive day 1-2 (exp decay), rest spread, referral bumps ignored v1
@@ -90,8 +105,10 @@ async function tick(ev){
   }catch(e){ log(`persona ${p.id} err: ${String(e).slice(0,80)}`); events.push({t:vnow+60,type:"persona_turn",p}); }
 }
 async function dailyJobs(day){
-  log(`--- virtual day ${day}: matching + dates + checkins`);
-  for(const a of ["runMatching","startScheduledDates","runCheckins"]){
+  log(`--- virtual day ${day}: matching + dates + engagement review + drain`);
+  // New unified proactive path: the nightly engagement review QUEUES follow-ups,
+  // the drainer sends the due ones. Replaces the old fixed-cadence runCheckins.
+  for(const a of ["runMatching","startScheduledDates","runEngagementReview","drainScheduled"]){
     try{ const r=await fetch(`${FNS}/demoAdmin?action=${a}`,{method:"POST"}); log(`${a}: ${(await r.text()).slice(0,120)}`);}catch(e){log(`${a} failed`)}
   }
   fs.writeFileSync(CKPT,JSON.stringify({vnow,day,personas:personas.map(p=>({id:p.id,state:p.state}))}));
