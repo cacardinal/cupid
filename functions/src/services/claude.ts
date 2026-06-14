@@ -6,6 +6,7 @@ import {
   buildMatchProposalPrompt,
   buildPostVideoFollowUpPrompt,
   buildMatchDescription,
+  buildVoicedMessagePrompt,
 } from "../prompts/cupid";
 
 export const MODEL = "claude-sonnet-4-5";
@@ -117,6 +118,31 @@ export async function generateMatchProposal(
   return parseClaudeResponse(extractText(response));
 }
 
+
+// ─── Voiced system message ────────────────────────────────────────────────────
+// Generate a system-initiated message (going live, window closed, orientation)
+// in Cupid's voice, personalized to the user, instead of a hardcoded string.
+// Falls back to a short safe line if the model call fails, so a live-mode flow
+// never breaks on a generation error.
+export async function generateVoicedMessage(
+  userProfile: UserProfile,
+  situation: string,
+  fallback: string
+): Promise<string> {
+  try {
+    const systemPrompt = buildVoicedMessagePrompt(userProfile, situation);
+    const response = await createCompletion({
+      model: MODEL,
+      max_tokens: 200,
+      system: systemPrompt,
+      messages: [{ role: "user", content: "Write the text now." }],
+    });
+    const text = parseClaudeResponse(extractText(response)).message.trim();
+    return text || fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 // ─── Friend-mode check-in ─────────────────────────────────────────────────────
 

@@ -13,6 +13,7 @@ import {
 } from "./firestore";
 import { createAnonymousRoom } from "./daily";
 import { sendSms } from "./twilio";
+import { generateVoicedMessage } from "./claude";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -37,7 +38,15 @@ export async function setUserLive(
     liveSessionId: sessionId,
   });
 
-  await sendSms(phone, "Love it. Let me see who's around right now 💘");
+  const profile = await getUser(phoneHash);
+  const msg = profile
+    ? await generateVoicedMessage(
+        profile,
+        "They just told you they are ready to meet someone right now, tonight, in person or on video. They are excited and a little bold. Match their energy and let them know you are already on the hunt for the right person for them this very moment. Confident wingman energy.",
+        "Love it. Let me see who's around right now 💘"
+      )
+    : "Love it. Let me see who's around right now 💘";
+  await sendSms(phone, msg);
 
   functions.logger.info("User went live", { phoneHash, sessionId });
 }
@@ -247,10 +256,12 @@ export async function expireLiveWaitingUsers(): Promise<number> {
 
     const phone = await getPhoneByHash(user.phoneHash);
     if (phone) {
-      await sendSms(
-        phone,
+      const msg = await generateVoicedMessage(
+        user,
+        "Their instant-match window just closed and nobody compatible happened to be around at the same moment. Let them down easy and with warmth, maybe a little humor. Make clear it is timing, not them, and the door is wide open to try again later. Do not make it sound like a system notification.",
         "No luck this round, nobody was around at the same time as you. It's timing, not you. We can try again whenever 💫"
       );
+      await sendSms(phone, msg);
     }
 
     expiredCount++;

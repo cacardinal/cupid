@@ -14,6 +14,7 @@ import {
   generateConversationReply,
   detectIntent,
   mergeProfileUpdates,
+  generateVoicedMessage,
 } from "../services/claude";
 import {
   sendSms,
@@ -123,7 +124,11 @@ export async function handleInboundSms(req: Request, res: Response): Promise<voi
       // Cancel live session
       if (profile.liveStatus === "waiting" && detectCancelLiveIntent(body)) {
         await setUserOffline(phoneHash, from, "user_cancel");
-        await sendSms(from, "Done. I'll keep an eye out for the right person for you 💫");
+        await sendSms(from, await generateVoicedMessage(
+          profile,
+          "They just called off the instant search for now (they had been live, looking to meet someone right away). Take it in stride, no pressure at all, let them know you will keep an eye out for the right person in the background.",
+          "Done. I'll keep an eye out for the right person for you 💫"
+        ));
         res.status(200).send("<Response/>");
         return;
       }
@@ -137,7 +142,11 @@ export async function handleInboundSms(req: Request, res: Response): Promise<voi
 
       // Already waiting — acknowledge
       if (profile.liveStatus === "waiting" && detectLiveIntent(body)) {
-        await sendSms(from, "Already on it 💘 I'll text you the second someone good turns up.");
+        await sendSms(from, await generateVoicedMessage(
+          profile,
+          "They are already live and you are already on the hunt for them, but they just nudged you again to find someone now. Reassure them playfully that you are already working it and you will ping them the second someone good shows up.",
+          "Already on it 💘 I'll text you the second someone good turns up."
+        ));
         res.status(200).send("<Response/>");
         return;
       }
@@ -146,8 +155,14 @@ export async function handleInboundSms(req: Request, res: Response): Promise<voi
     // ── Help shortcut ─────────────────────────────────────────────────────────
 
     if (detectHelpIntent(body)) {
-      const helpText = buildHelpMessage(profile.onboardingComplete);
-      await sendSms(from, helpText);
+      const situation = profile.onboardingComplete
+        ? "They asked what they can do or how this works. Tell them, in your voice, that they can just talk to you like a friend and you will handle the matchmaking. Charming, not a manual, no command list."
+        : "They asked what this is or how it works, and you are still getting to know them. Tell them, in your voice, that there is no app and no forms, they just text you like a friend and you take it from there.";
+      await sendSms(from, await generateVoicedMessage(
+        profile,
+        situation,
+        "Just keep texting me like you would a friend. Tell me what's on your mind or what you're after, and I'll take it from there."
+      ));
       res.status(200).send("<Response/>");
       return;
     }
@@ -514,12 +529,6 @@ async function getOtherSideMatch(
   return getMatchBetween(otherHash, thisHash);
 }
 
-function buildHelpMessage(onboarded: boolean): string {
-  if (!onboarded) {
-    return "I'm Cupid. Keep texting and I'll figure out the rest. No setup, no forms.";
-  }
-  return "Just keep texting me like you would a friend. Tell me what's on your mind or what you're after, and I'll take it from there.";
-}
 
 function maskPhone(phone: string): string {
   return phone.slice(0, 5) + "****" + phone.slice(-2);
