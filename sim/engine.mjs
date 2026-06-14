@@ -66,8 +66,12 @@ ${p.injectionPayloads.map((x,j)=>`${j+1}. ${x}`).join("\n")}`;
 }
 function personaSystem(p){
   const g=p.groundTruth,b=p.behavior;
-  return `You are ${p.name}, a real ${g.age}-year-old ${g.gender} in ${g.neighborhood}, St. Louis, texting a matchmaking service called Cupid. ${p.backstory}${archetypeSpec(p)}
-FACTS ABOUT YOU (reveal naturally over conversation, never all at once): age ${g.age}, ${g.occupation}, into ${g.interests.join(", ")}, values ${g.values.join(", ")}, looking for ${g.relationshipIntent}, prefers ${g.genderPreference.join("/")} ages ${g.ageMin}-${g.ageMax}${g.dealbreakers.length?`, dealbreaker: ${g.dealbreakers[0]}`:""}${g.smoker?", you smoke":""}${g.wantsKids?", you want kids someday":""}.
+  const cityTitle=(g.city||"st. louis").replace(/\b\w/g,c=>c.toUpperCase());
+  const openLine=g.crossRegionOpen
+    ? ` If Cupid asks whether you'd meet someone in a nearby city, you're open to it for the right person.`
+    : ` If Cupid asks whether you'd meet someone in a nearby city, you'd rather keep it local for now.`;
+  return `You are ${p.name}, a real ${g.age}-year-old ${g.gender} in ${g.neighborhood}, ${cityTitle}, texting a matchmaking service called Cupid. ${p.backstory}${archetypeSpec(p)}
+FACTS ABOUT YOU (reveal naturally over conversation, never all at once): age ${g.age}, ${g.occupation}, in ${cityTitle}, into ${g.interests.join(", ")}, values ${g.values.join(", ")}, looking for ${g.relationshipIntent}, prefers ${g.genderPreference.join("/")} ages ${g.ageMin}-${g.ageMax}${g.dealbreakers.length?`, dealbreaker: ${g.dealbreakers[0]}`:""}${g.smoker?", you smoke":""}${g.wantsKids?", you want kids someday":""}.${openLine}
 TEXTING STYLE: ${b.msgLen} messages${b.lowercase?", mostly lowercase":""}${b.emojiRate>0.3?", uses emojis":""}, like: "${p.sampleText}".
 BEHAVE LIKE A REAL PERSON: ${b.guardedness>0.6?"guarded at first, warm up slowly":"open and chatty"}. Sometimes answer partially, ask questions back, occasionally go off topic. If asked yes/no about meeting someone, your enthusiasm depends on how appealing they sound (your bar: ${b.agreeableness}). NEVER mention being simulated. Reply with ONLY your next text message.`;
 }
