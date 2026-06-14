@@ -37,10 +37,7 @@ export async function setUserLive(
     liveSessionId: sessionId,
   });
 
-  await sendSms(
-    phone,
-    `You're live! I'm scanning for someone compatible right now 🔍\n\nI'll connect you instantly if I find a great match in the next ${LIVE_WINDOW_MINUTES} minutes. Keep your phone close.`
-  );
+  await sendSms(phone, "Love it. Let me see who's around right now 💘");
 
   functions.logger.info("User went live", { phoneHash, sessionId });
 }
@@ -252,7 +249,7 @@ export async function expireLiveWaitingUsers(): Promise<number> {
     if (phone) {
       await sendSms(
         phone,
-        "Your live window closed — no compatible matches were online at the same time. It's timing, not fit. Text \"ready now\" anytime to try again 💫"
+        "No luck this round, nobody was around at the same time as you. It's timing, not you. We can try again whenever 💫"
       );
     }
 

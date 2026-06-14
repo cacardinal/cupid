@@ -104,8 +104,7 @@ export async function handleVoiceGather(req: Request, res: Response): Promise<vo
       const voiceResponse = new TwimlVoice.VoiceResponse();
       voiceResponse.say(
         { voice: "Polly.Joanna-Neural" },
-        "You're live! I'm scanning for a match right now. " +
-        "I'll text you the moment I find someone great. Keep your phone close!"
+        "Love it. Let me see who's around. I'll text you if I find someone great."
       );
       voiceResponse.hangup();
       res.type("text/xml").send(voiceResponse.toString());

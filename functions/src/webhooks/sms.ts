@@ -123,7 +123,7 @@ export async function handleInboundSms(req: Request, res: Response): Promise<voi
       // Cancel live session
       if (profile.liveStatus === "waiting" && detectCancelLiveIntent(body)) {
         await setUserOffline(phoneHash, from, "user_cancel");
-        await sendSms(from, "Got it — I've stopped the live search. I'll still be working on matches in the background!");
+        await sendSms(from, "Done. I'll keep an eye out for the right person for you 💫");
         res.status(200).send("<Response/>");
         return;
       }
@@ -137,7 +137,7 @@ export async function handleInboundSms(req: Request, res: Response): Promise<voi
 
       // Already waiting — acknowledge
       if (profile.liveStatus === "waiting" && detectLiveIntent(body)) {
-        await sendSms(from, "You're already live! I'm actively searching. I'll text you the moment I find a match 🔍");
+        await sendSms(from, "Already on it 💘 I'll text you the second someone good turns up.");
         res.status(200).send("<Response/>");
         return;
       }
@@ -240,11 +240,12 @@ async function handleConversationTurn(
 
   // If onboarding just completed, nudge toward live mode + send share invite
   const justCompleted = result.profileUpdates?.onboardingComplete && !profile.onboardingComplete;
-  let replyText = result.message;
+  const replyText = result.message;
   if (justCompleted) {
     void track("onboarding_completed", phoneHash); // analytics
-    replyText +=
-      "\n\nPS: Text me \"ready now\" anytime you want to connect with someone instantly. I'll find a match in real time 🔥";
+    // No appended command/manual text. The "ready now" affordance lives in
+    // CUPID_PERSONA, so Cupid raises it naturally in conversation when it fits
+    // rather than tacking a robotic PS onto the message.
   }
 
   await sendSms(phone, replyText);
@@ -517,9 +518,7 @@ function buildHelpMessage(onboarded: boolean): string {
   if (!onboarded) {
     return "I'm Cupid. Keep texting and I'll figure out the rest. No setup, no forms.";
   }
-  return (
-    'Text me anytime to chat or update what you want. Say "ready now" to look for someone right now, "cancel" to stop. Yes or no answers my match questions. Honest answers get you better dates.'
-  );
+  return "Just keep texting me like you would a friend. Tell me what's on your mind or what you're after, and I'll take it from there.";
 }
 
 function maskPhone(phone: string): string {
