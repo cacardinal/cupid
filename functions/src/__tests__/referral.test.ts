@@ -52,7 +52,8 @@ describe("buildShareMessage", () => {
     expect(msg).toContain(encodeURIComponent(code));
   });
 
-  test("contains the 'bonus free intro' incentive language", () => {
-    expect(msg.toLowerCase()).toContain("bonus");
+  test("communicates the free-intro incentive for both sides", () => {
+    expect(msg.toLowerCase()).toContain("free intro");
+    expect(msg.toLowerCase()).toContain("so do you");
   });
 });

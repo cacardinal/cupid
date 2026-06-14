@@ -64,9 +64,9 @@ export function buildShareMessage(
   const link = `sms:${cupidNumber}?body=${body}`;
 
   return (
-    `Love having you here 💘\n\n` +
-    `Know someone who's sick of swiping? Share your link — ` +
-    `they get a bonus free intro, and so do you when they join.\n\n` +
+    `Glad you're here.\n\n` +
+    `If someone comes to mind who'd want this too, send them your link. ` +
+    `They start with a free intro, and so do you.\n\n` +
     `${link}\n\n` +
     `Your code: ${referralCode}`
   );
