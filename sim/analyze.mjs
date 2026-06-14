@@ -57,8 +57,8 @@ const voice={msgs:cupidMsgs.length,emdash:cupidMsgs.reduce((a,m)=>a+(m.match(/[â
 // Judge sample
 let judgeAvg="n/a";
 if(JUDGE>0&&cupidMsgs.length){
-  const sample=cupidMsgs.slice(0,JUDGE).map((m,i)=>`${i+1}. "${m.slice(0,200)}"`).join("\n");
-  try{const r=await fetch(BRIDGE,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"sonnet",max_tokens:300,system:"You judge SMS copy against a voice guide: friend-not-assistant, no AI-isms, contractions, short, specific, max 1 emoji, never explains itself. Score each message 1-5. Reply ONLY with JSON: {\"scores\":[...],\"worst\":\"quote the worst one\",\"note\":\"one sentence\"}",messages:[{role:"user",content:sample}],_job:"sim-judge"})});
+  const sample=cupidMsgs.slice(0,JUDGE).map((m,i)=>`${i+1}. "${m.slice(0,600)}"`).join("\n");
+  try{const r=await fetch(BRIDGE,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"sonnet",max_tokens:300,system:"You judge SMS copy from an AI matchmaker. Target voice: a grounded, perceptive guide, warm but not performing, non-judging and steady, reflects before it steers, specific not generic. It must NOT use: ranking or sales language (worth your time, clears the bar), AI-isms, therapist cliches (that must be hard, holding space, how does that make you feel), or filler (a bare emoji, haha, empty acknowledgment). At most one emoji. Every message should carry something real (an observation, reflection, or question). Concise is good but substance matters more than brevity. The messages below may be cut at 600 chars; do NOT penalize a message merely for ending at the cutoff. Score each message 1-5. Reply ONLY with JSON: {\"scores\":[...],\"worst\":\"quote the worst one\",\"note\":\"one sentence\"}",messages:[{role:"user",content:sample}],_job:"sim-judge"})});
   const j=JSON.parse((await r.json()).content[0].text.match(/\{[\s\S]*\}/)[0]);judgeAvg=(j.scores.reduce((a,b)=>a+b,0)/j.scores.length).toFixed(2)+` | worst: ${j.worst?.slice(0,120)} | ${j.note}`;}catch(e){judgeAvg="judge failed: "+String(e).slice(0,60)}
 }
 // Archetype audit (wave-3+: thirsty + freeloader personas; no-op if none present)
