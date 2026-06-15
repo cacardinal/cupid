@@ -33,11 +33,15 @@ export function proactiveCeilingExceeded(
   now: Date = new Date()
 ): boolean {
   const nowMs = now.getTime();
+  // Sim runs in compressed real time; collapse the min-gap in DEMO_MODE so a
+  // member can receive more than one proactive send across the run (the weekly
+  // cap still prevents spam). Production gap untouched.
+  const minGapHours = process.env.DEMO_MODE === "true" ? 0.1 : PROACTIVE_MIN_GAP_HOURS;
 
   // Min-gap on the most recent proactive send.
   if (member.lastProactiveAt) {
     const hoursSince = (nowMs - member.lastProactiveAt.toMillis()) / 3_600_000;
-    if (hoursSince < PROACTIVE_MIN_GAP_HOURS) return true;
+    if (hoursSince < minGapHours) return true;
   }
 
   // Weekly cap over the rolling window.

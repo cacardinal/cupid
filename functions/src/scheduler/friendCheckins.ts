@@ -19,11 +19,20 @@ const ESTABLISHED_CADENCE_DAYS = 7;
 const EARLY_CHECKIN_THRESHOLD = 3;
 const RECENT_ACTIVITY_HOURS = 24;
 
+// The sim compresses many virtual days into a few real hours, but this cadence
+// is measured in real wall-clock time. In DEMO_MODE only, collapse the multi-day
+// cadence and the recent-activity window so the proactive review is actually
+// exercisable under time compression. Production cadence is untouched.
+const DEMO = (): boolean => process.env.DEMO_MODE === "true";
+
 export function isDueForCheckin(profile: UserProfile, now: Date = new Date()): boolean {
   if (!profile.active || !profile.onboardingComplete) return false;
 
   const count = profile.checkinCount ?? 0;
-  const cadenceDays = count < EARLY_CHECKIN_THRESHOLD ? EARLY_CADENCE_DAYS : ESTABLISHED_CADENCE_DAYS;
+  const cadenceDays = DEMO()
+    ? 0
+    : count < EARLY_CHECKIN_THRESHOLD ? EARLY_CADENCE_DAYS : ESTABLISHED_CADENCE_DAYS;
+  const recentActivityHours = DEMO() ? 0.2 : RECENT_ACTIVITY_HOURS;
 
   // Anchor on last check-in, falling back to profile updatedAt (covers brand-new users)
   const anchor = profile.lastCheckinAt ?? profile.updatedAt;
@@ -33,7 +42,7 @@ export function isDueForCheckin(profile: UserProfile, now: Date = new Date()): b
 
   // A friend doesn't double-text: skip if THEY were active very recently
   const sinceUpdate = (now.getTime() - profile.updatedAt.toMillis()) / 3_600_000;
-  if (sinceUpdate < RECENT_ACTIVITY_HOURS && (profile.lastCheckinAt?.toMillis() ?? 0) < profile.updatedAt.toMillis()) {
+  if (sinceUpdate < recentActivityHours && (profile.lastCheckinAt?.toMillis() ?? 0) < profile.updatedAt.toMillis()) {
     return false;
   }
   return true;
