@@ -6,12 +6,16 @@ import {
   getConversationHistory,
   appendConversationTurn,
   updateUser,
+  getUser,
   getActiveMatchForUser,
   updateMatchStatus,
   updateMatchRecord,
+  getMatchBetween,
+  getPhoneByHash,
 } from "../services/firestore";
 import {
   generateConversationReply,
+  generateDebriefReply,
   detectIntent,
   mergeProfileUpdates,
   generateVoicedMessage,
@@ -23,9 +27,14 @@ import {
   sendDeclinedMessage,
 } from "../services/twilio";
 import { createAnonymousRoom } from "../services/daily";
-import { detectLiveIntent, detectCancelLiveIntent, detectHelpIntent } from "../services/intentDetector";
+import {
+  detectLiveIntent,
+  detectCancelLiveIntent,
+  detectHelpIntent,
+  detectReactivationIntent,
+} from "../services/intentDetector";
 import { setUserLive, setUserOffline } from "../services/liveMatching";
-import { UserProfile } from "../models/user";
+import { BlockedMatch, UserProfile } from "../models/user";
 import { extractReferralCode, processReferral, buildShareMessage } from "../services/referral";
 import { track } from "../services/analytics"; // analytics: all calls below are `void track(...)` fire-and-forget
 import { logAbuseEvent } from "../services/abuseLog"; // abuse signals: all calls below are `void logAbuseEvent(...)`
@@ -217,8 +226,17 @@ export async function handleInboundSms(req: Request, res: Response): Promise<voi
 
     const activeMatch = await getActiveMatchForUser(phoneHash);
 
-    if (activeMatch && ["proposed", "mutual_interest", "video_expired", "scheduling"].includes(activeMatch.status)) {
+    if (activeMatch && ["proposed", "mutual_interest", "video_expired", "scheduling", "debriefing"].includes(activeMatch.status)) {
       await handleMatchResponse(from, body, profile, activeMatch.id!, activeMatch);
+      res.status(200).send("<Response/>");
+      return;
+    }
+
+    // ── Reactivation (post-block, no active match) ────────────────────────────
+    // Only meaningful once a pair has been blocked. Gated on onboarded users
+    // with no active match in flight, so it never collides with a live flow.
+    if (profile.onboardingComplete && !activeMatch && detectReactivationIntent(body)) {
+      await handleReactivation(from, profile);
       res.status(200).send("<Response/>");
       return;
     }
@@ -389,6 +407,14 @@ async function handleMatchResponse(
     return;
   }
 
+  // Post-date debrief is a conversation, not a yes/no. Route it before the
+  // intent classifier so an open answer ("it was nice but...") is not forced
+  // into a proposal yes/no decision.
+  if (matchRecord.status === "debriefing") {
+    await handleDebriefReply(phone, userMessage, profile, matchId, matchRecord);
+    return;
+  }
+
   const intent = await detectIntent(userMessage);
 
   if (matchRecord.status === "proposed") {
@@ -402,7 +428,16 @@ async function handleMatchResponse(
       const otherHash = matchRecord.matchedUserId;
       const otherMatchSnap = await getOtherSideMatch(otherHash, phoneHash);
 
-      if (otherMatchSnap?.userAccepted === true) {
+      // Mutual-decline gate: if the other side already declined, do not advance
+      // to scheduling. Warm close, block the pair so they are never re-proposed.
+      if (otherMatchSnap?.status === "user_declined") {
+        await updateMatchStatus(phoneHash, matchId, "no_fit");
+        await blockPair(phoneHash, otherHash, "declined");
+        await sendSms(
+          phone,
+          "They're not feeling it on their end, so I won't push it. I'll keep looking for you."
+        );
+      } else if (otherMatchSnap?.userAccepted === true) {
         await startScheduling(phone, phoneHash, matchId, otherHash, otherMatchSnap.id!);
       } else {
         await sendSms(
@@ -412,6 +447,7 @@ async function handleMatchResponse(
       }
     } else if (intent === "no") {
       await updateMatchStatus(phoneHash, matchId, "user_declined");
+      await blockPair(phoneHash, matchRecord.matchedUserId, "declined");
       void track("match_declined", phoneHash, { matchId }); // analytics
       await sendSms(
         phone,
@@ -420,10 +456,12 @@ async function handleMatchResponse(
     } else {
       await sendSms(
         phone,
-        "Just to be clear — are you interested in meeting this person? A simple yes or no works!"
+        "Just to be clear, are you interested in meeting this person? A simple yes or no works."
       );
     }
   } else if (matchRecord.status === "video_expired") {
+    // video_expired here means the contact-exchange OFFER is pending (both
+    // debriefs were positive). Yes = consent to swap numbers.
     if (intent === "yes") {
       await updateMatchRecord(phoneHash, matchId, {
         contactExchanged: true,
@@ -434,20 +472,253 @@ async function handleMatchResponse(
       const otherMatchSnap = await getOtherSideMatch(otherHash, phoneHash);
 
       if (otherMatchSnap?.contactExchanged === true) {
-        void track("contact_exchanged", phoneHash, { matchId }); // analytics
-        await sendContactExchangeMessage(
-          phone,
-          "your match",
-          "Contact info shared via separate message"
-        );
+        // Both consented: perform the swap. This is the ONLY place a real phone
+        // number is sent, fetched at send time and never stored or logged.
+        await performContactSwap(phone, phoneHash, otherHash, matchId);
       } else {
-        await sendSms(phone, "Got it! Waiting to hear back from them. I'll let you know.");
+        await sendSms(phone, "Got it. Waiting to hear back from them, I'll let you know.");
       }
     } else if (intent === "no") {
       await updateMatchRecord(phoneHash, matchId, { status: "contact_declined" });
+      await blockPair(phoneHash, matchRecord.matchedUserId, "declined");
       await sendDeclinedMessage(phone);
     }
   }
+}
+
+// ─── Contact exchange (the only place a real phone number is sent) ──────────────
+
+/**
+ * Both sides consented (contactExchanged===true). Fetch each real number at send
+ * time, text each person the OTHER's number, never store in a new collection and
+ * never log a number. If a number cannot be resolved, fail gracefully.
+ */
+async function performContactSwap(
+  thisPhone: string,
+  thisHash: string,
+  otherHash: string,
+  matchId: string
+): Promise<void> {
+  const [thisNumber, otherNumber] = await Promise.all([
+    getPhoneByHash(thisHash),
+    getPhoneByHash(otherHash),
+  ]);
+
+  if (!thisNumber || !otherNumber) {
+    // Never crash, never log a number. Graceful follow-up to the side we can reach.
+    await sendSms(thisPhone, "I couldn't complete that just now, I'll follow up shortly.");
+    return;
+  }
+
+  void track("contact_exchanged", thisHash, { matchId }); // analytics: track hashes internally
+
+  // Tell each consenting user the OTHER's number. The label is neutral (no names).
+  await Promise.all([
+    sendContactExchangeMessage(thisNumber, "your match", otherNumber),
+    sendContactExchangeMessage(otherNumber, "your match", thisNumber),
+  ]);
+}
+
+// ─── Post-date debrief stage ────────────────────────────────────────────────────
+
+/**
+ * Handle one inbound debrief turn. Profile extraction stays active (every reply
+ * enriches the profile, exactly like a normal conversation turn). When Cupid
+ * lands a confident fit read, or the turn cap (3) is hit, the stage ends with a
+ * structured read written to this side's MatchRecord and the pair is evaluated
+ * for the contact-exchange offer.
+ */
+async function handleDebriefReply(
+  phone: string,
+  userMessage: string,
+  profile: UserProfile,
+  matchId: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  matchRecord: any
+): Promise<void> {
+  const phoneHash = profile.phoneHash;
+  const otherHash = matchRecord.matchedUserId;
+
+  const history = await getConversationHistory(phoneHash);
+
+  await appendConversationTurn(phoneHash, {
+    role: "user",
+    content: userMessage,
+    timestamp: Timestamp.now(),
+  });
+
+  // The matched person's profile gives the generator date context.
+  const matchProfile = (await getUser(otherHash)) ?? profile;
+  const result = await generateDebriefReply(profile, matchProfile, history, userMessage);
+
+  await appendConversationTurn(phoneHash, {
+    role: "assistant",
+    content: result.message,
+    timestamp: Timestamp.now(),
+  });
+
+  // Profile extraction stays active: merge + persist exactly like a normal turn.
+  if (result.profileUpdates) {
+    const merged = mergeProfileUpdates(profile, result.profileUpdates);
+    if (Object.keys(merged).length > 0) {
+      await updateUser(phoneHash, merged);
+    }
+  }
+
+  await sendSms(phone, result.message);
+
+  const turnCount = (matchRecord.debriefTurnCount ?? 0) + 1;
+  await updateMatchRecord(phoneHash, matchId, { debriefTurnCount: turnCount });
+
+  const read = result.debriefRead;
+  const forceEnd = turnCount >= 3;
+  if (!read && !forceEnd) return; // stage continues, ask another turn
+
+  // End the stage on this side. A force-end with no confident read is "unsure"
+  // (treated as non-positive: no offer, warm no-fit exit).
+  const fit = read?.fit ?? "unsure";
+  const updates: Partial<import("../models/user").MatchRecord> = {
+    feedbackGiven: true,
+    fit,
+    status: "feedback_given",
+  };
+  if (read?.feedbackScore !== undefined) updates.feedbackScore = read.feedbackScore;
+  await updateMatchRecord(phoneHash, matchId, updates);
+  void track("feedback_given", phoneHash, { matchId, fit }); // analytics
+
+  await maybeOfferContactExchange(phoneHash, otherHash, matchId);
+}
+
+/**
+ * Both-consent gate for the contact-exchange OFFER. Invoked when one side has
+ * finished its debrief. Only when BOTH sides are feedback_given AND both
+ * fit==="positive" does Cupid send the swap-numbers offer (both -> video_expired).
+ * Any non-positive read on either side ends both as no_fit and blocks the pair.
+ */
+async function maybeOfferContactExchange(
+  thisHash: string,
+  otherHash: string,
+  thisMatchId: string
+): Promise<void> {
+  const other = await getMatchBetween(otherHash, thisHash);
+
+  // Other side has not finished its debrief yet: hold, no offer, no number.
+  if (!other || other.status !== "feedback_given") {
+    const thisPhone = await getPhoneByHash(thisHash);
+    if (thisPhone) {
+      await sendSms(thisPhone, "Thanks for the rundown. Let me check in with them and I'll be back.");
+    }
+    return;
+  }
+
+  const bothPositive = other.fit === "positive" && (await sideIsPositive(thisHash, thisMatchId));
+
+  const [thisPhone, otherPhone] = await Promise.all([
+    getPhoneByHash(thisHash),
+    getPhoneByHash(otherHash),
+  ]);
+
+  if (bothPositive) {
+    // Move both into the contact-exchange OFFER state (video_expired). The yes/no
+    // reply re-enters the existing video_expired branch in handleMatchResponse.
+    await Promise.all([
+      updateMatchRecord(thisHash, thisMatchId, { status: "video_expired" }),
+      updateMatchRecord(otherHash, other.id!, { status: "video_expired" }),
+    ]);
+    const offer = "You both came away wanting more. Want me to pass along numbers so you can take it from here? (yes/no)";
+    await Promise.all([
+      thisPhone ? sendSms(thisPhone, offer) : Promise.resolve(),
+      otherPhone ? sendSms(otherPhone, offer) : Promise.resolve(),
+    ]);
+    return;
+  }
+
+  // Non-positive on either side: warm no-fit exit + block the pair both ways.
+  await Promise.all([
+    updateMatchStatus(thisHash, thisMatchId, "no_fit"),
+    updateMatchStatus(otherHash, other.id!, "no_fit"),
+  ]);
+  await blockPair(thisHash, otherHash, "no_fit");
+  const noFit = "Sounds like this one wasn't the match. That's good to know, it sharpens what I'm looking for. More soon.";
+  await Promise.all([
+    thisPhone ? sendSms(thisPhone, noFit) : Promise.resolve(),
+    otherPhone ? sendSms(otherPhone, noFit) : Promise.resolve(),
+  ]);
+}
+
+/** Read this side's persisted fit (it was just written before this call). */
+async function sideIsPositive(thisHash: string, thisMatchId: string): Promise<boolean> {
+  const { getMatchRecord } = await import("../services/firestore");
+  const rec = await getMatchRecord(thisHash, thisMatchId);
+  return rec?.fit === "positive";
+}
+
+// ─── Re-match avoidance: block / clear / reactivate ─────────────────────────────
+
+/**
+ * Append a symmetric block to BOTH users keyed by the OTHER's phoneHash. Dedupes
+ * by hash, keeping the newest reason. Never stores a phone number.
+ */
+async function blockPair(
+  aHash: string,
+  bHash: string,
+  reason: "declined" | "no_fit"
+): Promise<void> {
+  const at = Timestamp.now();
+  await Promise.all([
+    appendBlock(aHash, bHash, reason, at),
+    appendBlock(bHash, aHash, reason, at),
+  ]);
+}
+
+async function appendBlock(
+  ownerHash: string,
+  otherHash: string,
+  reason: "declined" | "no_fit",
+  at: import("firebase-admin/firestore").Timestamp
+): Promise<void> {
+  const owner = await getUser(ownerHash);
+  if (!owner) return;
+  const existing = (owner.blockedMatches ?? []).filter((m) => m.phoneHash !== otherHash);
+  const next: BlockedMatch[] = [...existing, { phoneHash: otherHash, reason, at }];
+  await updateUser(ownerHash, { blockedMatches: next });
+}
+
+/** Remove the pair's block from BOTH users' blockedMatches. */
+async function clearBlock(aHash: string, bHash: string): Promise<void> {
+  await Promise.all([removeBlock(aHash, bHash), removeBlock(bHash, aHash)]);
+}
+
+async function removeBlock(ownerHash: string, otherHash: string): Promise<void> {
+  const owner = await getUser(ownerHash);
+  if (!owner) return;
+  const next = (owner.blockedMatches ?? []).filter((m) => m.phoneHash !== otherHash);
+  await updateUser(ownerHash, { blockedMatches: next });
+}
+
+/**
+ * Reactivation: a member wants to bring back a pair they (or the other side)
+ * blocked. Deterministic rule: target the MOST RECENT block (the product stores
+ * no name, so a name-targeted "give Alex another shot" cannot resolve a hash,
+ * the newest block is the best deterministic guess). Clears the block on both
+ * sides and re-queues for matching. The 24h matchCooldownUntil is untouched.
+ */
+async function handleReactivation(phone: string, profile: UserProfile): Promise<void> {
+  const blocks = profile.blockedMatches ?? [];
+  if (blocks.length === 0) {
+    await sendSms(phone, "There's no one to bring back right now, but I'm still on it for you.");
+    return;
+  }
+  // Most recent block by timestamp.
+  const newest = [...blocks].sort((a, b) => b.at.toMillis() - a.at.toMillis())[0];
+  await clearBlock(profile.phoneHash, newest.phoneHash);
+
+  // Re-queue for matching (fire-and-forget; cooldown may defer the proposal).
+  void import("../scheduler/jobs")
+    .then(({ attemptInstantMatch }) => attemptInstantMatch(profile.phoneHash))
+    .catch((err) => functions.logger.error("Reactivation re-queue failed", err));
+
+  await sendSms(phone, "Ok, I'll see if they're open to another go and circle back.");
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

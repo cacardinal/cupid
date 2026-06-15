@@ -116,7 +116,7 @@ export async function attemptInstantMatch(phoneHash: string): Promise<InstantMat
   const { getUser, getUsersWithoutRecentMatch, getActiveMatchForUser } = await import(
     "../services/firestore"
   );
-  const { computeCompatibility } = await import("./matchingJob");
+  const { computeCompatibility, isPairBlocked } = await import("./matchingJob");
 
   const me = await getUser(phoneHash);
   if (!me || !me.onboardingComplete) return { matched: false, reason: "not_ready" };
@@ -128,6 +128,8 @@ export async function attemptInstantMatch(phoneHash: string): Promise<InstantMat
   const pool = (await getUsersWithoutRecentMatch(24)).filter((u) => u.phoneHash !== phoneHash);
   let best: MatchPair | null = null;
   for (const cand of pool) {
+    // Re-match avoidance: never re-pair a pair that already said no.
+    if (isPairBlocked(me, cand)) continue;
     const r = computeCompatibility(me, cand);
     if (!r.passed || r.score < INSTANT_MATCH_MIN_SCORE) continue;
     if (!best || r.score > best.score) {
@@ -317,10 +319,11 @@ export interface VideoExpirySummary {
  *               their actual room expiry (demo use only).
  */
 export async function runVideoExpiryFollowUp(force = false): Promise<VideoExpirySummary> {
-  const { getAllActiveUsers, getActiveMatchForUser, updateMatchStatus, getPhoneByHash } =
+  const { getAllActiveUsers, getActiveMatchForUser, updateMatchRecord, getPhoneByHash, appendConversationTurn } =
     await import("../services/firestore");
   const { generatePostVideoFollowUp } = await import("../services/claude");
   const { sendSms } = await import("../services/twilio");
+  const { Timestamp } = await import("firebase-admin/firestore");
 
   const users = await getAllActiveUsers();
   const summary: VideoExpirySummary = { followUpsSent: 0, matches: [] };
@@ -328,6 +331,8 @@ export async function runVideoExpiryFollowUp(force = false): Promise<VideoExpiry
   for (const user of users) {
     try {
       const match = await getActiveMatchForUser(user.phoneHash);
+      // Idempotent: only video_sent matches enter the debrief, so this fires
+      // exactly once per match (after which the status is debriefing).
       if (!match || match.status !== "video_sent") continue;
 
       if (!force) {
@@ -336,15 +341,27 @@ export async function runVideoExpiryFollowUp(force = false): Promise<VideoExpiry
         if (expiry.toMillis() > Date.now()) continue;
       }
 
+      // Open the post-date debrief STAGE: status -> debriefing, ask "how did it
+      // go", and reset the turn counter. Replies route to handleDebriefReply.
       const followUp = await generatePostVideoFollowUp(user);
-      await updateMatchStatus(user.phoneHash, match.id!, "video_expired");
+      await updateMatchRecord(user.phoneHash, match.id!, {
+        status: "debriefing",
+        debriefTurnCount: 0,
+      });
 
       const phone = await getPhoneByHash(user.phoneHash);
       if (phone) {
         await sendSms(phone, followUp.message);
-        functions.logger.info("Video follow-up sent", { userHash: user.phoneHash });
+        // Record the opener so the debrief handler has conversation context for
+        // profile extraction on the user's first reply.
+        await appendConversationTurn(user.phoneHash, {
+          role: "assistant",
+          content: followUp.message,
+          timestamp: Timestamp.now(),
+        });
+        functions.logger.info("Debrief opened", { userHash: user.phoneHash.slice(0, 8) });
       } else {
-        functions.logger.warn("No phone mapping for video follow-up", { userHash: user.phoneHash });
+        functions.logger.warn("No phone mapping for debrief opener", { userHash: user.phoneHash.slice(0, 8) });
       }
 
       summary.followUpsSent++;

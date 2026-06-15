@@ -53,7 +53,10 @@ export function proactiveCeilingExceeded(
   return false;
 }
 
-export async function runEngagementReview(limit = 100): Promise<EngagementReviewSummary> {
+// Default capped low so a single review run cannot fire its whole decideFollowUp
+// burst in one tick and starve persona conversations of shared bridge slots in
+// the sim. The gates (cadence ceiling, busy-match) still apply per member.
+export async function runEngagementReview(limit = 40): Promise<EngagementReviewSummary> {
   const {
     getAllActiveUsers,
     getActiveMatchForUser,

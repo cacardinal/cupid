@@ -11,6 +11,14 @@ const USERS=+(args.users??100), VDAYS=+(args.vdays??7), WALL=+(args.wallhours??2
 // guard so NEW personas using fresh phone indices (e.g. 60+) can run into the
 // existing pool instead of failing the ground-truth check.
 const APPEND = !!(args.append || args.cumulative);
+// DEMO-only date-outcome knob: probability a given date reads as a real spark.
+// Default 0.2 = ~80% of dates come back not-a-fit, exercising the no_fit + block
+// path far more than the contact-exchange path. Flipped ONCE per date and stored
+// on persona state so every debrief turn for that date stays consistent.
+const FIT_PROBABILITY = +(process.env.FIT_PROBABILITY ?? 0.2);
+// Per-step burst cap (shared bridge slots). Raised from 12 so more personas
+// advance per tick; overridable to dial back on Anthropic 429s.
+const BURST = +(process.env.BURST ?? 16);
 const RATIO = (VDAYS*24*60) / (WALL*60); // virtual minutes per wall minute
 const FNS="http://127.0.0.1:5001/cupid-dating-mvp/us-central1";
 const FS=`http://127.0.0.1:8080/v1/projects/cupid-dating-mvp/databases/(default)/documents`;
@@ -70,9 +78,17 @@ function personaSystem(p){
   const openLine=g.crossRegionOpen
     ? ` If Cupid asks whether you'd meet someone in a nearby city, you're open to it for the right person.`
     : ` If Cupid asks whether you'd meet someone in a nearby city, you'd rather keep it local for now.`;
+  // Date outcome directive (DEMO): once a date has happened, all debrief turns
+  // must stay consistent with the pre-rolled outcome stored on persona state.
+  const fitLine = p.state?.fitOutcome === "spark"
+    ? ` IF Cupid is asking how a recent video date went: it genuinely clicked, you'd want to see them again. Give one or two specific true-sounding details (something they said, a shared laugh, a moment) and make clear you're into it. If Cupid later asks whether to swap numbers, say yes.`
+    : p.state?.fitOutcome === "nofit"
+    ? ` IF Cupid is asking how a recent video date went: it was fine but not a match for you. Be honest and kind, name one concrete reason it didn't land (no spark, different energy, looking for different things) and that you'd pass on a second one. Don't be cruel, just clear.`
+    : "";
   return `You are ${p.name}, a real ${g.age}-year-old ${g.gender} in ${g.neighborhood}, ${cityTitle}, texting a matchmaking service called Cupid. ${p.backstory}${archetypeSpec(p)}
 FACTS ABOUT YOU (reveal naturally over conversation, never all at once): age ${g.age}, ${g.occupation}, in ${cityTitle}, into ${g.interests.join(", ")}, values ${g.values.join(", ")}, looking for ${g.relationshipIntent}, prefers ${g.genderPreference.join("/")} ages ${g.ageMin}-${g.ageMax}${g.dealbreakers.length?`, dealbreaker: ${g.dealbreakers[0]}`:""}${g.smoker?", you smoke":""}${g.wantsKids?", you want kids someday":""}.${openLine}
 TEXTING STYLE: ${b.msgLen} messages${b.lowercase?", mostly lowercase":""}${b.emojiRate>0.3?", uses emojis":""}, like: "${p.sampleText}".
+MOVING THROUGH THE FLOW: if Cupid offers a few date times numbered 1, 2, 3, reply with just the number that works (or "none" if truly none do). If Cupid sends a video link, acknowledge it briefly like you're about to hop on. After a video date, Cupid will check in to hear how it went, answer naturally over a couple of messages.${fitLine}
 BEHAVE LIKE A REAL PERSON: ${b.guardedness>0.6?"guarded at first, warm up slowly":"open and chatty"}. Sometimes answer partially, ask questions back, occasionally go off topic. If asked yes/no about meeting someone, your enthusiasm depends on how appealing they sound (your bar: ${b.agreeableness}). NEVER mention being simulated. Reply with ONLY your next text message.`;
 }
 async function personaReply(p,history){
@@ -100,6 +116,15 @@ async function tick(ev){
     }
     // hazard rolls only when the persona is actually about to take a turn
     if(!ev.first && rnd()<p.behavior.dropoutHazard){ p.state.dropped=true; return; }
+    // Roll the date outcome ONCE, the first time Cupid asks how a date went, and
+    // store it on persona state so every debrief turn stays consistent. ~80% read
+    // as not-a-fit (FIT_PROBABILITY default 0.2).
+    if(!p.state.fitOutcome){
+      const lastCupid=[...hist].reverse().find(m=>m.role==="user")?.content?.toLowerCase()??"";
+      if(/how did it go|how was|how'd it go|how was the date|tell me about the/.test(lastCupid)){
+        p.state.fitOutcome = rnd()<FIT_PROBABILITY ? "spark" : "nofit";
+      }
+    }
     const text=await personaReply(p,hist);
     (p.state.sentLog??=[]).push({body:text,at:new Date().toISOString()});
     await sendInbound(p.phone,text);
@@ -112,7 +137,9 @@ async function dailyJobs(day){
   log(`--- virtual day ${day}: matching + dates + engagement review + drain`);
   // New unified proactive path: the nightly engagement review QUEUES follow-ups,
   // the drainer sends the due ones. Replaces the old fixed-cadence runCheckins.
-  for(const a of ["runMatching","startScheduledDates","runEngagementReview","drainScheduled"]){
+  // expireVideo advances dated pairs into the debrief stage so the post-match
+  // funnel (debrief -> feedback -> exchange / no_fit) actually runs in a wave.
+  for(const a of ["runMatching","startScheduledDates","expireVideo","runEngagementReview","drainScheduled"]){
     try{ const r=await fetch(`${FNS}/demoAdmin?action=${a}`,{method:"POST"}); log(`${a}: ${(await r.text()).slice(0,120)}`);}catch(e){log(`${a} failed`)}
   }
   fs.writeFileSync(CKPT,JSON.stringify({vnow,day,personas:personas.map(p=>({id:p.id,state:p.state}))}));
@@ -126,8 +153,8 @@ while(vnow<endV){
   if(day>lastDay){ lastDay=day; if(day>0) await dailyJobs(day); }
   const due=events.filter(e=>e.t<=vnow); 
   for(const e of due){ events.splice(events.indexOf(e),1); }
-  await Promise.all(due.slice(0,12).map(tick)); // cap burst
-  for(const e of due.slice(12)) events.push({...e,t:vnow+5});
+  await Promise.all(due.slice(0,BURST).map(tick)); // cap burst (env BURST)
+  for(const e of due.slice(BURST)) events.push({...e,t:vnow+5});
   if(!due.length) await new Promise(r=>setTimeout(r,1500));
 }
 await dailyJobs(VDAYS);

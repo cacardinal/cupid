@@ -6,6 +6,7 @@ import {
   buildOnboardingSystemPrompt,
   buildMatchProposalPrompt,
   buildPostVideoFollowUpPrompt,
+  buildDebriefPrompt,
   buildMatchDescription,
   buildVoicedMessagePrompt,
   stripDashes,
@@ -305,6 +306,83 @@ export async function generatePostVideoFollowUp(
   return parseClaudeResponse(extractText(response));
 }
 
+// ─── Post-date debrief (multi-turn) ────────────────────────────────────────────
+//
+// A debrief reply is a normal conversation turn that ALSO enriches the profile
+// (profile extraction stays active) and MAY emit a confident structured read
+// (<debrief_read>) to end the stage. Built on buildDebriefPrompt, which extends
+// the post-video follow-up with date context + the structured-read instruction.
+
+export interface DebriefRead {
+  fit: "positive" | "negative" | "unsure";
+  feedbackScore?: number; // 1-5 when present
+}
+
+export interface DebriefResult {
+  message: string;
+  profileUpdates: Record<string, unknown> | null;
+  debriefRead: DebriefRead | null;
+}
+
+/**
+ * Fail-closed parser for the <debrief_read> structured block. Returns null on
+ * no block, malformed JSON, an invalid fit enum, or done!==true. The visible
+ * message is stripped of this block at the parseClaudeResponse choke point, so
+ * a confident read never leaks into the user's SMS.
+ */
+export function interpretDebrief(rawText: string): DebriefRead | null {
+  const m = rawText.match(/<debrief_read>([\s\S]*?)<\/debrief_read>/);
+  if (!m) return null;
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(m[1].trim());
+  } catch {
+    return null;
+  }
+  if (parsed.done !== true) return null;
+  const fit = String(parsed.fit ?? "");
+  if (fit !== "positive" && fit !== "negative" && fit !== "unsure") return null;
+  const read: DebriefRead = { fit };
+  const score = Number(parsed.feedbackScore);
+  if (Number.isInteger(score) && score >= 1 && score <= 5) {
+    read.feedbackScore = score;
+  }
+  return read;
+}
+
+export async function generateDebriefReply(
+  userProfile: UserProfile,
+  matchProfile: UserProfile,
+  history: ConversationTurn[],
+  userMessage: string
+): Promise<DebriefResult> {
+  const matchDescription = buildMatchDescription(matchProfile);
+  const systemPrompt = buildDebriefPrompt(userProfile, matchDescription);
+
+  const messages: Anthropic.MessageParam[] = [
+    ...history.map((turn) => ({
+      role: turn.role as "user" | "assistant",
+      content: turn.content,
+    })),
+    { role: "user" as const, content: userMessage },
+  ];
+
+  const response = await createCompletion({
+    model: MODEL,
+    max_tokens: 1024,
+    system: systemPrompt,
+    messages,
+  });
+
+  const rawText = extractText(response);
+  const parsed = parseClaudeResponse(rawText);
+  return {
+    message: parsed.message,
+    profileUpdates: parsed.profileUpdates,
+    debriefRead: interpretDebrief(rawText),
+  };
+}
+
 // ─── Intent detection ─────────────────────────────────────────────────────────
 
 export async function detectIntent(
@@ -343,7 +421,7 @@ function extractText(response: Anthropic.Message): string {
     .join("");
 }
 
-function parseClaudeResponse(rawText: string): ClaudeResponse {
+export function parseClaudeResponse(rawText: string): ClaudeResponse {
   const profileUpdateMatch = rawText.match(/<profile_update>([\s\S]*?)<\/profile_update>/);
   let profileUpdates: Record<string, unknown> | null = null;
 
@@ -355,12 +433,14 @@ function parseClaudeResponse(rawText: string): ClaudeResponse {
     }
   }
 
-  // Strip profile_update blocks from the visible message — including an
-  // UNTERMINATED block (max_tokens truncation can cut off the closing tag,
-  // which would otherwise leak raw JSON into the user's SMS).
+  // Strip profile_update AND debrief_read blocks from the visible message —
+  // including an UNTERMINATED block (max_tokens truncation can cut off the
+  // closing tag, which would otherwise leak raw JSON into the user's SMS).
   const messageRaw = rawText
     .replace(/<profile_update>[\s\S]*?<\/profile_update>/g, "")
-    .replace(/<profile_update>[\s\S]*$/, "");
+    .replace(/<profile_update>[\s\S]*$/, "")
+    .replace(/<debrief_read>[\s\S]*?<\/debrief_read>/g, "")
+    .replace(/<debrief_read>[\s\S]*$/, "");
   // Brand rule: no em/en dashes in anything Cupid sends. The prompt forbids
   // them but models still slip; enforce deterministically (wave-smoke finding).
   const message = stripDashes(messageRaw).trim();

@@ -203,10 +203,46 @@ export function buildPostVideoFollowUpPrompt(userProfile: UserProfile): string {
 You're following up after a video intro call. The user just had a 10-15 minute anonymous video call with their match.
 
 Check in warmly and ask two things:
-1. How did it go? (Keep this casual — not a survey)
+1. How did it go? (Keep this casual, not a survey)
 2. Do they want to exchange contact info with this person?
 
 Keep the message short and conversational.
+
+${PROFILE_EXTRACTION_INSTRUCTIONS}`;
+}
+
+// ─── Post-date debrief (multi-turn) ────────────────────────────────────────────
+//
+// The debrief is a short conversation (1 to 3 turns) after a date, not a survey.
+// It enriches the profile (extraction stays active) AND, when Cupid is confident
+// how the date landed, emits a structured read that ends the stage. The read is
+// internal: it is stripped from the visible SMS at the parse choke point, exactly
+// like profile_update.
+export function buildDebriefPrompt(
+  userProfile: UserProfile,
+  matchDescription: string
+): string {
+  const summary = buildMatchDescription(userProfile) || buildProfileSummary(userProfile);
+  const dateContext = matchDescription
+    ? `The person they just met: ${matchDescription}.`
+    : "";
+  return `${CUPID_PERSONA}
+
+You are checking in after their video date, like a friend who wants the real story. This is a short back and forth, not a survey. Open with how it went, then follow what they give you: ask one specific thing about the date or the person (the spark, the conversation, whether they'd want to see them again), one question at a time. Keep it to a few turns.
+
+What you know about them: ${summary}
+${dateContext}
+
+While you talk, you naturally pick up new things about what they want, what bothered them, what they liked. Capture those normally in the profile_update block (a new dealbreaker, a fresh interest, a sharpened want all count).
+
+DO NOT raise swapping numbers or contact info here. That is a separate step you handle only once you have a clear read. Just get the honest story of how the date went.
+
+WHEN YOU HAVE A CONFIDENT READ on how this date landed for them, and only then, append a structured read in this exact format on its own line (it is internal, never shown to them):
+<debrief_read>{"fit":"positive","feedbackScore":4,"done":true}</debrief_read>
+- fit: "positive" if they clearly want to see this person again, "negative" if they clearly do not, "unsure" if it is genuinely mixed.
+- feedbackScore: an integer 1 to 5 (1 rough, 5 great).
+- done: true only when you are confident. If you are not sure yet, omit the block entirely and ask one more real question.
+Never explain the block, never mention it, never let it appear in the text you send.
 
 ${PROFILE_EXTRACTION_INSTRUCTIONS}`;
 }

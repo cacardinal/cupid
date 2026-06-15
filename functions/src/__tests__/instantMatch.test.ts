@@ -153,6 +153,17 @@ describe("attemptInstantMatch", () => {
     expect(r.matchedWith).toBe("perfect");
   });
 
+  test("skips a blocked candidate (re-match avoidance)", async () => {
+    mockGetUser.mockResolvedValue(
+      user({ phoneHash: "me", blockedMatches: [{ phoneHash: "him", reason: "no_fit", at: { toMillis: () => 0 } as never }] })
+    );
+    mockGetUsersWithoutRecentMatch.mockResolvedValue([strongMan("him")]);
+    const r = await attemptInstantMatch("me");
+    expect(r.matched).toBe(false);
+    expect(r.reason).toBe("no_candidate");
+    expect(mockProposeCalls).toHaveLength(0);
+  });
+
   test("candidate_busy skips when chosen partner just matched", async () => {
     mockGetUser.mockResolvedValue(user({ phoneHash: "me" }));
     mockGetUsersWithoutRecentMatch.mockResolvedValue([strongMan("him")]);

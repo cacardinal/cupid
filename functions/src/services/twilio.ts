@@ -137,10 +137,13 @@ export async function sendContactExchangeMessage(
   otherName: string,
   otherPhone: string
 ): Promise<string> {
-  const body = `Great connection! Here are ${otherName}'s details:
-📱 ${otherPhone}
+  // otherName is a neutral label ("your match"), never a real name. The only
+  // real phone number Cupid ever sends rides in this single message, allowlisted
+  // so the outbound scrubber lets it through.
+  const body = `Here's how to reach ${otherName}:
+${otherPhone}
 
-Reach out and take it from here. Rooting for you both 💫`;
+Take it from here. Rooting for you both 💫`;
   return sendSms(to, body, { allowPhones: [otherPhone] });
 }
 

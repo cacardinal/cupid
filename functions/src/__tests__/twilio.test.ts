@@ -22,12 +22,18 @@ jest.mock("../services/abuseLog", () => ({
 }));
 
 // scrubOutbound is dynamically imported inside sendSms; control its result.
+// scrubSpy captures (body, allowPhones) so the contact-exchange test can assert
+// the real number was passed through allowPhones (the only sanctioned PII sink).
 let scrubResult: { body: string; removedUrls: string[]; removedPhones: string[] };
+const scrubSpy = jest.fn();
 jest.mock("../services/outboundSecurity", () => ({
-  scrubOutbound: () => scrubResult,
+  scrubOutbound: (...a: unknown[]) => {
+    scrubSpy(...a);
+    return scrubResult;
+  },
 }));
 
-import { sendSms } from "../services/twilio";
+import { sendSms, sendContactExchangeMessage } from "../services/twilio";
 
 const SAVED = { DEMO_MODE: process.env.DEMO_MODE };
 const TO = "+13145559999";
@@ -35,6 +41,7 @@ const TO = "+13145559999";
 beforeEach(() => {
   logAbuseEventMock.mockReset();
   trackMock.mockReset();
+  scrubSpy.mockReset();
   process.env.DEMO_MODE = "true"; // route to the outbox, never hit Twilio
   scrubResult = { body: "clean", removedUrls: [], removedPhones: [] };
 });
@@ -80,5 +87,30 @@ describe("sendSms SITE 2 contact_scrub", () => {
     scrubResult = { body: "all clean", removedUrls: [], removedPhones: [] };
     await sendSms(TO, "raw");
     expect(logAbuseEventMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("sendContactExchangeMessage (the only sanctioned PII sink)", () => {
+  const OTHER = "+13145551234";
+
+  test("passes the real number through allowPhones", async () => {
+    scrubResult = { body: "x", removedUrls: [], removedPhones: [] };
+    await sendContactExchangeMessage(TO, "your match", OTHER);
+    // scrubOutbound is called (body, allowPhones); allowPhones MUST carry the number.
+    expect(scrubSpy).toHaveBeenCalled();
+    const [, allowPhones] = scrubSpy.mock.calls[0];
+    expect(allowPhones).toEqual([OTHER]);
+  });
+
+  test("the built body contains the number and is dash-free at source", async () => {
+    scrubResult = { body: "x", removedUrls: [], removedPhones: [] };
+    await sendContactExchangeMessage(TO, "your match", OTHER);
+    const [rawBody] = scrubSpy.mock.calls[0] as [string, string[]];
+    // sendSms strips dashes before scrub; the body reaching scrub must already
+    // be dash-free AND must contain the real number (allowlisted to survive).
+    expect(rawBody).toContain(OTHER);
+    expect(rawBody).not.toMatch(/[—–]/);
+    // Neutral label, never a real name.
+    expect(rawBody).toContain("your match");
   });
 });

@@ -11,7 +11,9 @@ import { fileURLToPath } from "node:url";
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const USAGE = path.join(DIR, "state", "usage.jsonl");
 const PORT = parseInt(process.env.BRIDGE_PORT ?? "5599", 10);
-const POOL = parseInt(process.env.BRIDGE_POOL ?? "6", 10);
+// DEMO throughput: default 12 concurrent `claude -p` workers (was 6). Env
+// BRIDGE_POOL dials it back if Anthropic returns 429s on the shared Max sub.
+const POOL = parseInt(process.env.BRIDGE_POOL ?? "12", 10);
 const CLAUDE = process.env.CLAUDE_BIN ?? "claude";
 
 const MODEL_MAP = { /* SDK ids -> CLI aliases */

@@ -1,5 +1,5 @@
 import { proposeSlots, parseSlotReply, formatSlotCT, buildIcs, slotsMessage } from "../services/scheduling";
-import { isDueForCheckin } from "../scheduler/friendCheckins";
+import { isDueForCheckin, BUSY_MATCH_STATUSES } from "../scheduler/friendCheckins";
 import { Timestamp } from "firebase-admin/firestore";
 import { UserProfile } from "../models/user";
 
@@ -107,5 +107,14 @@ describe("isDueForCheckin", () => {
     expect(
       isDueForCheckin(mkUser({ lastCheckinAt: daysAgo(5), checkinCount: 1, updatedAt: Timestamp.fromMillis(now.getTime() - 3_600_000) }), now)
     ).toBe(false);
+  });
+});
+
+describe("BUSY_MATCH_STATUSES leaves mid-flow members alone", () => {
+  it("includes the post-date debrief and contact-offer states", () => {
+    // The engagement review must never proactively text someone mid-debrief or
+    // mid-contact-offer.
+    expect(BUSY_MATCH_STATUSES.has("debriefing")).toBe(true);
+    expect(BUSY_MATCH_STATUSES.has("video_expired")).toBe(true);
   });
 });

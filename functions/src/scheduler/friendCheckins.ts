@@ -56,6 +56,8 @@ export const BUSY_MATCH_STATUSES = new Set([
   "scheduled",
   "mutual_interest",
   "video_sent",
+  "debriefing",
+  "video_expired",
 ]);
 
 export async function runFriendCheckins(limit = 25): Promise<number> {

@@ -73,6 +73,32 @@ export function detectYesNoIntent(text: string): "yes" | "no" | "ambiguous" {
   return "ambiguous";
 }
 
+// ─── Reactivation intent ──────────────────────────────────────────────────────
+//
+// A member who declined or had a no-fit date asking to bring that pair back.
+// Deterministic substring match, same style as detectLiveIntent. Clears the most
+// recent block on a match (see handleReactivation in webhooks/sms.ts).
+
+const REACTIVATION_KEYWORDS = [
+  "reconsider",
+  "changed my mind",
+  "change my mind",
+  "second chance",
+  "another shot",
+  "another chance",
+  "another go",
+  "second meet",
+  "second date",
+  "reconnect",
+  "reactivate",
+  "give them another",
+];
+
+export function detectReactivationIntent(text: string): boolean {
+  const normalized = text.toLowerCase().trim();
+  return REACTIVATION_KEYWORDS.some((kw) => normalized.includes(kw));
+}
+
 // ─── Help intent ──────────────────────────────────────────────────────────────
 
 const HELP_KEYWORDS = ["help", "what can you do", "how does this work", "commands", "options"];

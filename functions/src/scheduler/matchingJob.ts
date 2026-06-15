@@ -95,6 +95,19 @@ export interface MatchPair {
   reasons: string[];
 }
 
+/**
+ * Deterministic re-match avoidance. A pair is blocked when EITHER side has a
+ * BlockedMatch entry keyed by the other's phoneHash (declined or no_fit). Reads
+ * only the structured blockedMatches list, never prose, so the matcher stays
+ * deterministic. The matcher entry points (findTopMatches, attemptInstantMatch)
+ * skip any blocked pair.
+ */
+export function isPairBlocked(a: UserProfile, b: UserProfile): boolean {
+  const aBlocks = (a.blockedMatches ?? []).some((m) => m.phoneHash === b.phoneHash);
+  const bBlocks = (b.blockedMatches ?? []).some((m) => m.phoneHash === a.phoneHash);
+  return aBlocks || bBlocks;
+}
+
 export function findTopMatches(
   users: UserProfile[],
   minScore = 50,
@@ -111,6 +124,9 @@ export function findTopMatches(
 
       // Skip same user (shouldn't happen, but guard anyway)
       if (a.phoneHash === b.phoneHash) continue;
+
+      // Re-match avoidance: never re-pair a pair that already said no.
+      if (isPairBlocked(a, b)) continue;
 
       const result = computeCompatibility(a, b);
       if (!result.passed || result.score < minScore) continue;

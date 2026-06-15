@@ -4,6 +4,7 @@ import {
   buildMatchDescription,
   buildDecideFollowUpPrompt,
   buildOpennessInterpretationPrompt,
+  buildDebriefPrompt,
   stripDashes,
 } from "../prompts/cupid";
 import { UserProfile } from "../models/user";
@@ -169,5 +170,41 @@ describe("stripDashes", () => {
   test("converts em/en dash to comma-space", () => {
     expect(stripDashes("warm — specific")).toBe("warm, specific");
     expect(stripDashes("a–b")).toBe("a, b");
+  });
+});
+
+describe("buildDebriefPrompt", () => {
+  const profile = makeProfile({
+    demographics: { age: 31, gender: "woman", city: "st. louis", orientation: "straight" },
+    personality: { interests: ["climbing", "jazz"], values: ["honesty"] },
+  });
+  const p = buildDebriefPrompt(profile, "32 years old, in st. louis, loves hiking and bbq");
+
+  test("includes the Cupid persona", () => {
+    expect(p).toContain("You are Cupid");
+  });
+
+  test("includes the match description as date context", () => {
+    expect(p).toContain("loves hiking and bbq");
+  });
+
+  test("instructs the <debrief_read> structured format", () => {
+    expect(p).toContain("<debrief_read>");
+    expect(p).toContain('"fit"');
+    expect(p).toContain('"done"');
+  });
+
+  test("keeps profile extraction active", () => {
+    expect(p).toContain("<profile_update>");
+  });
+
+  test("forbids dashes and the contact-exchange pitch here", () => {
+    expect(p).toContain("NEVER use em-dashes");
+    expect(p).toContain("DO NOT raise swapping numbers");
+    // The debrief-specific copy (everything after the inherited persona) must be
+    // dash-free at source.
+    const debriefSection = p.split("PROFILE EXTRACTION")[0].split("You are checking in after their video date")[1];
+    expect(debriefSection).toBeTruthy();
+    expect(debriefSection).not.toMatch(/[—–]/);
   });
 });

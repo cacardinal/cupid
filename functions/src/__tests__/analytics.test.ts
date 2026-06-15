@@ -145,6 +145,8 @@ describe("AnalyticsEvents catalogue", () => {
         "match_declined",
         "date_scheduled",
         "video_room_opened",
+        "feedback_given",
+        "no_fit",
         "contact_exchanged",
         "referral_redeemed",
         "checkin_sent",

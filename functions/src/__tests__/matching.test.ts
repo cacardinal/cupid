@@ -1,9 +1,10 @@
 import { Timestamp } from "firebase-admin/firestore";
-import { UserProfile } from "../models/user";
+import { UserProfile, BlockedMatch } from "../models/user";
 import {
   computeCompatibility,
   findTopMatches,
   locationMatch,
+  isPairBlocked,
   CompatibilityResult,
 } from "../scheduler/matchingJob";
 
@@ -455,5 +456,56 @@ describe("gender vocabulary normalization (zero-match root cause)", () => {
     const man = base("man", "women");
     const r = computeCompatibility(woman, man);
     expect(r.passed).toBe(true);
+  });
+});
+
+// ─── Re-match avoidance (blocked pairs) ─────────────────────────────────────────
+
+function block(otherHash: string, reason: "declined" | "no_fit" = "declined"): BlockedMatch {
+  return { phoneHash: otherHash, reason, at: Timestamp.now() };
+}
+
+describe("isPairBlocked", () => {
+  test("false when neither side blocked the other", () => {
+    const [a, b] = makeCompatibleMalePair();
+    expect(isPairBlocked(a, b)).toBe(false);
+  });
+
+  test("true when A blocked B", () => {
+    const [a, b] = makeCompatibleMalePair();
+    a.blockedMatches = [block(b.phoneHash)];
+    expect(isPairBlocked(a, b)).toBe(true);
+  });
+
+  test("true when only B blocked A (one-sided still blocks the pair)", () => {
+    const [a, b] = makeCompatibleMalePair();
+    b.blockedMatches = [block(a.phoneHash, "no_fit")];
+    expect(isPairBlocked(a, b)).toBe(true);
+  });
+
+  test("ignores a block keyed to an unrelated hash", () => {
+    const [a, b] = makeCompatibleMalePair();
+    a.blockedMatches = [block("hash_someone_else")];
+    expect(isPairBlocked(a, b)).toBe(false);
+  });
+});
+
+describe("findTopMatches re-match avoidance", () => {
+  test("excludes a pair blocked by A", () => {
+    const [a, b] = makeCompatibleMalePair();
+    a.blockedMatches = [block(b.phoneHash)];
+    expect(findTopMatches([a, b], 1)).toHaveLength(0);
+  });
+
+  test("excludes a pair blocked by only ONE side (B blocked A)", () => {
+    const [a, b] = makeCompatibleMalePair();
+    b.blockedMatches = [block(a.phoneHash, "no_fit")];
+    expect(findTopMatches([a, b], 1)).toHaveLength(0);
+  });
+
+  test("an unblocked compatible pair is still selected", () => {
+    const [a, b] = makeCompatibleMalePair();
+    const pairs = findTopMatches([a, b], 1);
+    expect(pairs).toHaveLength(1);
   });
 });

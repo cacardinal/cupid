@@ -248,6 +248,7 @@ export async function getActiveMatchForUser(phoneHash: string): Promise<MatchRec
       "scheduled",
       "mutual_interest",
       "video_sent",
+      "debriefing",
       "video_expired",
       "live_connecting",
     ])

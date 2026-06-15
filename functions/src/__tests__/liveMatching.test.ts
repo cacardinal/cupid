@@ -1,4 +1,4 @@
-import { detectLiveIntent, detectCancelLiveIntent, detectYesNoIntent, detectHelpIntent } from "../services/intentDetector";
+import { detectLiveIntent, detectCancelLiveIntent, detectYesNoIntent, detectHelpIntent, detectReactivationIntent } from "../services/intentDetector";
 
 // ─── detectLiveIntent ─────────────────────────────────────────────────────────
 
@@ -135,5 +135,27 @@ describe("detectHelpIntent", () => {
 
   test("does not trigger on normal message", () => {
     expect(detectHelpIntent("I like hiking and cooking")).toBe(false);
+  });
+});
+
+// ─── detectReactivationIntent ──────────────────────────────────────────────────
+
+describe("detectReactivationIntent", () => {
+  test("matches reconsider / changed my mind", () => {
+    expect(detectReactivationIntent("Actually I want to reconsider that one")).toBe(true);
+    expect(detectReactivationIntent("I changed my mind about her")).toBe(true);
+  });
+
+  test("matches second chance / another shot", () => {
+    expect(detectReactivationIntent("can he get a second chance")).toBe(true);
+    expect(detectReactivationIntent("give them another shot")).toBe(true);
+  });
+
+  test("is case-insensitive", () => {
+    expect(detectReactivationIntent("SECOND CHANCE please")).toBe(true);
+  });
+
+  test("does not trigger on unrelated text", () => {
+    expect(detectReactivationIntent("I like long walks and good coffee")).toBe(false);
   });
 });

@@ -1,4 +1,4 @@
-import { mergeProfileUpdates } from "../services/claude";
+import { mergeProfileUpdates, interpretDebrief, parseClaudeResponse } from "../services/claude";
 import { UserProfile } from "../models/user";
 import { Timestamp } from "firebase-admin/firestore";
 
@@ -122,5 +122,69 @@ describe("mergeProfileUpdates", () => {
     const profile = baseProfile();
     const merged = mergeProfileUpdates(profile, {});
     expect(merged).toEqual({});
+  });
+});
+
+describe("interpretDebrief (<debrief_read> parser, fail-closed)", () => {
+  test("parses a confident positive read to {fit, feedbackScore}", () => {
+    const raw = `It really sounds like a good one.
+<debrief_read>{"fit":"positive","feedbackScore":4,"done":true}</debrief_read>`;
+    expect(interpretDebrief(raw)).toEqual({ fit: "positive", feedbackScore: 4 });
+  });
+
+  test("parses a negative read", () => {
+    const raw = `<debrief_read>{"fit":"negative","feedbackScore":2,"done":true}</debrief_read>`;
+    expect(interpretDebrief(raw)).toEqual({ fit: "negative", feedbackScore: 2 });
+  });
+
+  test("returns null when no block is present", () => {
+    expect(interpretDebrief("no structured read here")).toBeNull();
+  });
+
+  test("returns null when done is not true (not yet confident)", () => {
+    const raw = `<debrief_read>{"fit":"positive","feedbackScore":4,"done":false}</debrief_read>`;
+    expect(interpretDebrief(raw)).toBeNull();
+  });
+
+  test("returns null on malformed JSON", () => {
+    const raw = `<debrief_read>{fit:positive,}</debrief_read>`;
+    expect(interpretDebrief(raw)).toBeNull();
+  });
+
+  test("validates the fit enum (invalid fit -> null)", () => {
+    const raw = `<debrief_read>{"fit":"maybe","feedbackScore":3,"done":true}</debrief_read>`;
+    expect(interpretDebrief(raw)).toBeNull();
+  });
+
+  test("omits feedbackScore when out of the 1-5 range", () => {
+    const raw = `<debrief_read>{"fit":"unsure","feedbackScore":9,"done":true}</debrief_read>`;
+    expect(interpretDebrief(raw)).toEqual({ fit: "unsure" });
+  });
+
+  test("omits feedbackScore when not an integer", () => {
+    const raw = `<debrief_read>{"fit":"positive","feedbackScore":3.5,"done":true}</debrief_read>`;
+    expect(interpretDebrief(raw)).toEqual({ fit: "positive" });
+  });
+});
+
+describe("parseClaudeResponse strips internal blocks from the visible message", () => {
+  test("strips both profile_update and debrief_read", () => {
+    const raw = `Glad it went well.
+<debrief_read>{"fit":"positive","feedbackScore":5,"done":true}</debrief_read>
+<profile_update>{"personality":{"interests":["climbing"]}}</profile_update>`;
+    const out = parseClaudeResponse(raw);
+    expect(out.message).toBe("Glad it went well.");
+    expect(out.message).not.toContain("debrief_read");
+    expect(out.message).not.toContain("profile_update");
+    expect(out.profileUpdates).toEqual({ personality: { interests: ["climbing"] } });
+  });
+
+  test("an unterminated debrief_read block does not leak into the message", () => {
+    const raw = `Sounds promising.
+<debrief_read>{"fit":"positive","feedbackScore":4,"do`;
+    const out = parseClaudeResponse(raw);
+    expect(out.message).toBe("Sounds promising.");
+    expect(out.message).not.toContain("debrief_read");
+    expect(out.message).not.toContain("fit");
   });
 });

@@ -23,15 +23,21 @@ const simUsers=users.filter(u=>byHash[u.id]);
 
 // Funnel
 const funnel={arrived:personas.length,profileCreated:simUsers.length,onboarded:simUsers.filter(u=>u.onboardingComplete).length};
-let matched=0,accepted=0,scheduled=0,dated=0,exchanged=0,oracle=[],violations=0;
+let matched=0,accepted=0,scheduled=0,dated=0,feedbackGiven=0,noFit=0,exchanged=0,oracle=[],violations=0;
 const { computeCompatibility } = await import("../functions/lib/scheduler/matchingJob.js");
+// Post-match lifecycle status sets. A "debriefing" or "feedback_given" match
+// means the pair dated; "no_fit" is a warm terminal exit after a date.
+const SCHED=["scheduled","video_sent","debriefing","video_expired","feedback_given","no_fit","contact_shared","contact_declined"];
+const DATED=["video_sent","debriefing","video_expired","feedback_given","no_fit","contact_shared","contact_declined"];
 for(const u of simUsers){
   const ms=(await(await fetch(`${FS}/users/${u.id}/matches?pageSize=20`,{headers:H})).json()).documents?.map(d=>dec(d.fields))??[];
   if(ms.length)matched++;
   for(const m of ms){
     if(m.userAccepted)accepted++;
-    if(["scheduled","video_sent","video_expired","contact_shared","contact_declined"].includes(m.status))scheduled++;
-    if(["video_expired","contact_shared","contact_declined"].includes(m.status))dated++;
+    if(SCHED.includes(m.status))scheduled++;
+    if(DATED.includes(m.status))dated++;
+    if(m.feedbackGiven||["debriefing","feedback_given"].includes(m.status))feedbackGiven++;
+    if(m.status==="no_fit")noFit++;
     if(m.status==="contact_shared")exchanged++;
     const other=byHash[m.matchedUserId];
     if(other){
@@ -59,7 +65,16 @@ let judgeAvg="n/a";
 if(JUDGE>0&&cupidMsgs.length){
   const sample=cupidMsgs.slice(0,JUDGE).map((m,i)=>`${i+1}. "${m.slice(0,600)}"`).join("\n");
   try{const r=await fetch(BRIDGE,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"sonnet",max_tokens:300,system:"You judge SMS copy from an AI matchmaker. Target voice: a grounded, perceptive guide, warm but not performing, non-judging and steady, reflects before it steers, specific not generic. It must NOT use: ranking or sales language (worth your time, clears the bar), AI-isms, therapist cliches (that must be hard, holding space, how does that make you feel), or filler (a bare emoji, haha, empty acknowledgment). At most one emoji. Every message should carry something real (an observation, reflection, or question). Concise is good but substance matters more than brevity. The messages below may be cut at 600 chars; do NOT penalize a message merely for ending at the cutoff. Score each message 1-5. Reply ONLY with JSON: {\"scores\":[...],\"worst\":\"quote the worst one\",\"note\":\"one sentence\"}",messages:[{role:"user",content:sample}],_job:"sim-judge"})});
-  const j=JSON.parse((await r.json()).content[0].text.match(/\{[\s\S]*\}/)[0]);judgeAvg=(j.scores.reduce((a,b)=>a+b,0)/j.scores.length).toFixed(2)+` | worst: ${j.worst?.slice(0,120)} | ${j.note}`;}catch(e){judgeAvg="judge failed: "+String(e).slice(0,60)}
+  // Hardened parse: the model occasionally returns prose around the JSON or no
+  // JSON at all. Match the LAST balanced-looking {...}, null-check it, and wrap
+  // JSON.parse so a bad judge response degrades to a label instead of throwing.
+  const txt=(await r.json()).content?.[0]?.text??"";
+  const matches=[...txt.matchAll(/\{[\s\S]*\}/g)];
+  const blob=matches.length?matches[matches.length-1][0]:null;
+  if(!blob){judgeAvg="judge parse failed";}
+  else{let j=null;try{j=JSON.parse(blob);}catch{j=null;}
+    if(!j||!Array.isArray(j.scores)||!j.scores.length){judgeAvg="judge parse failed";}
+    else{judgeAvg=(j.scores.reduce((a,b)=>a+b,0)/j.scores.length).toFixed(2)+` | worst: ${(j.worst??"").slice(0,120)} | ${j.note??""}`;}}}catch(e){judgeAvg="judge failed: "+String(e).slice(0,60)}
 }
 // Archetype audit (wave-3+: thirsty + freeloader personas; no-op if none present)
 let archetypeSection="";
@@ -123,7 +138,7 @@ leaks: ${leaks.length} (MUST be 0)${leaks.length?"\n  - "+[...new Set(leaks)].sl
 const pct=(x)=>x[1]?`${Math.round(100*x[0]/x[1])}% (${x[0]}/${x[1]})`:"n/a";
 const report=`# Wave ${WAVE} Report (${new Date().toISOString().slice(0,16)})
 ## Funnel
-arrived ${funnel.arrived} -> profiles ${funnel.profileCreated} -> onboarded ${funnel.onboarded} -> matched ${matched} -> accepted ${accepted} -> scheduled ${scheduled} -> dated ${dated} -> exchanged ${exchanged}
+arrived ${funnel.arrived} -> profiles ${funnel.profileCreated} -> onboarded ${funnel.onboarded} -> matched ${matched} -> accepted ${accepted} -> scheduled ${scheduled} -> dated ${dated} -> feedback ${feedbackGiven} -> exchanged ${exchanged} (no_fit ${noFit})
 ## Extraction accuracy (vs ground truth)
 age exact: ${pct(acc.age)} | intent: ${pct(acc.relationshipIntent)} | interests precision avg: ${acc.interests.length?Math.round(100*acc.interests.reduce((a,b)=>a+b,0)/acc.interests.length)+"%":"n/a"} | dealbreaker captured: ${pct(acc.dealbreakers)}
 ## Match quality

@@ -95,6 +95,19 @@ export interface UserProfile {
   // same gap/region within a window.
   lastProactiveAt?: Timestamp;        // last engagement-review send (any kind)
   proactiveLog?: ProactiveLogEntry[]; // rolling, trimmed to last ~10 by the review
+
+  // Re-match avoidance. A decline or a non-positive debrief writes a block on
+  // BOTH users keyed by the OTHER's phoneHash, so the matcher never re-pairs a
+  // pair that already said no. Lives on the user doc (not a new collection) so
+  // the PII surface is unchanged. Cleared by reactivation intent. Never holds a
+  // phone number, only a hash.
+  blockedMatches?: BlockedMatch[];
+}
+
+export interface BlockedMatch {
+  phoneHash: string;             // the OTHER user's hash (never a phone)
+  reason: "declined" | "no_fit";
+  at: Timestamp;
 }
 
 export type ProactiveKind = "rapport" | "deepen" | "reveal_match";
@@ -139,6 +152,10 @@ export interface MatchRecord {
   feedbackGiven?: boolean;
   feedbackScore?: number;      // 1-5 post-call rating
   feedbackNotes?: string;
+  // Structured post-date debrief read for THIS side. Written when the debrief
+  // stage lands a confident fit read (or force-ends at the turn cap as "unsure").
+  fit?: "positive" | "negative" | "unsure";
+  debriefTurnCount?: number;   // debrief replies seen this match (cap at 3)
   // Scheduled-date flow
   proposedSlots?: Timestamp[];   // candidate times Cupid offered
   scheduledAt?: Timestamp;       // locked-in date time
@@ -159,10 +176,12 @@ export type MatchStatus =
   // Shared post-video states
   | "mutual_interest"  // Both said yes (async) or both joined (live)
   | "video_sent"       // Video link sent to both
-  | "video_expired"    // Room expired, follow-up sent
+  | "debriefing"       // Post-date debrief conversation in progress (this side)
+  | "video_expired"    // Contact-exchange offer pending (both debriefs positive)
   | "contact_shared"   // Both consented to share contact info
   | "contact_declined" // One or both declined contact exchange
-  | "feedback_given";  // Post-match feedback received
+  | "feedback_given"   // Post-date debrief landed a fit read (this side)
+  | "no_fit";          // Warm terminal exit, pair will not be re-matched
 
 export function generateReferralCode(phoneHash: string): string {
   return "CUP-" + phoneHash.slice(0, 6).toUpperCase();

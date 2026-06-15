@@ -30,6 +30,8 @@ export const AnalyticsEvents = {
   matchDeclined: "match_declined",
   dateScheduled: "date_scheduled",
   videoRoomOpened: "video_room_opened",
+  feedbackGiven: "feedback_given",
+  noFit: "no_fit",
   contactExchanged: "contact_exchanged",
   referralRedeemed: "referral_redeemed",
   checkinSent: "checkin_sent",
