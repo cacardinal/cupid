@@ -35,7 +35,7 @@ describe("mergeProfileUpdates", () => {
     };
     const merged = mergeProfileUpdates(profile, updates);
     expect(merged.demographics?.age).toBe(28);
-    expect(merged.demographics?.city).toBe("St. Louis");
+    expect(merged.demographics?.city).toBe("st. louis");
   });
 
   test("does not overwrite existing demographics with null", () => {
@@ -51,7 +51,30 @@ describe("mergeProfileUpdates", () => {
     expect(merged.demographics?.age).toBe(30);
     expect(merged.demographics?.gender).toBe("woman");
     // Non-null should update
-    expect(merged.demographics?.city).toBe("Chicago");
+    expect(merged.demographics?.city).toBe("chicago");
+  });
+
+  describe("city normalization at merge boundary", () => {
+    test("neighborhood + state suffix collapses to canonical metro", () => {
+      const merged = mergeProfileUpdates(baseProfile(), {
+        demographics: { city: "Tower Grove, St. Louis, MO" },
+      });
+      expect(merged.demographics?.city).toBe("st. louis");
+    });
+
+    test("suburb maps to kansas city", () => {
+      const merged = mergeProfileUpdates(baseProfile(), {
+        demographics: { city: "Overland Park" },
+      });
+      expect(merged.demographics?.city).toBe("kansas city");
+    });
+
+    test("unknown city passes through lowercased", () => {
+      const merged = mergeProfileUpdates(baseProfile(), {
+        demographics: { city: "Austin" },
+      });
+      expect(merged.demographics?.city).toBe("austin");
+    });
   });
 
   test("merges personality interests (array)", () => {

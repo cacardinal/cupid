@@ -108,9 +108,13 @@ export function isPairBlocked(a: UserProfile, b: UserProfile): boolean {
   return aBlocks || bBlocks;
 }
 
+// Nightly sweep gate. Dropped 50 -> 40 after the fuzzy-overlap recalibration:
+// soft-scoring caps in the mid-40s, so 50 created zero pairs on the live pool.
+export const NIGHTLY_MATCH_MIN_SCORE = 40;
+
 export function findTopMatches(
   users: UserProfile[],
-  minScore = 50,
+  minScore = NIGHTLY_MATCH_MIN_SCORE,
   maxMatchesPerUser = 1
 ): MatchPair[] {
   const pairs: MatchPair[] = [];
@@ -200,21 +204,80 @@ function ageRangeMatch(seeker: UserProfile, candidate: UserProfile): boolean {
   return true;
 }
 
+// Canonical metros and their aliases (neighborhoods, suburbs, state-tagged
+// forms). CONSERVATIVE: only well-known same-metro aliases are mapped; anything
+// not listed passes through trimmed/lowercased and UNCHANGED. St. Louis and
+// Kansas City are kept strictly distinct.
+const ST_LOUIS_ALIASES = new Set([
+  "st. louis", "st louis", "saint louis", "stl",
+  "tower grove", "the grove", "the hill", "soulard", "central west end", "cwe",
+  "clayton", "kirkwood", "webster groves", "maplewood", "richmond heights",
+  "ballwin", "chesterfield", "creve coeur", "ladue", "brentwood", "shrewsbury",
+  "affton", "florissant", "ferguson", "o'fallon mo", "st. charles", "st charles",
+  "saint charles", "u city", "university city", "dogtown", "south city",
+  "downtown st. louis", "downtown stl",
+]);
+const KANSAS_CITY_ALIASES = new Set([
+  "kansas city", "kc", "kcmo", "kck",
+  "overland park", "olathe", "lees summit", "lee's summit", "independence",
+  "shawnee", "lenexa", "blue springs", "north kansas city", "liberty mo",
+  "raytown", "gladstone", "leawood", "prairie village", "westport",
+]);
+
+/**
+ * Deterministic city -> canonical metro. Steps:
+ *  1. lowercase + trim
+ *  2. strip a trailing state suffix (", mo" / ", missouri" / ", ks" / ", kansas"
+ *     and bare " missouri"/" kansas")
+ *  3. strip a leading neighborhood-prefix pattern "<hood>, <city>" -> keep the
+ *     city part (e.g. "tower grove, st. louis" -> "st. louis")
+ *  4. alias lookup -> "st. louis" | "kansas city"
+ *  5. unknown -> return the cleaned (lowercased/trimmed) value unchanged
+ * Never merges two genuinely-different metros. Exported for tests.
+ */
+export function normalizeCity(raw: unknown): string | null {
+  if (raw == null) return null;
+  let s = String(raw).toLowerCase().trim();
+  if (!s) return null;
+
+  // 2. strip state suffix
+  s = s.replace(/,?\s*(missouri|kansas|mo|ks)\s*$/i, "").trim();
+  s = s.replace(/[.,]+$/g, "").trim();
+
+  // 3+4. check full string and each comma-part against alias sets
+  const parts = s.split(",").map((p) => p.trim()).filter(Boolean);
+  const candidates = [s, ...parts];
+  for (const c of candidates) {
+    if (ST_LOUIS_ALIASES.has(c)) return "st. louis";
+    if (KANSAS_CITY_ALIASES.has(c)) return "kansas city";
+  }
+
+  // 5. unknown: return the LAST comma-part (the city, not the neighborhood),
+  // cleaned; or the whole cleaned string if no comma.
+  const tail = parts.length > 0 ? parts[parts.length - 1] : s;
+  // re-run state-strip on tail in case suffix sat on the tail part
+  return tail.replace(/,?\s*(missouri|kansas|mo|ks)\s*$/i, "").trim() || s;
+}
+
 export function locationMatch(a: UserProfile, b: UserProfile): boolean {
-  // Same city is sufficient (MVP). Cross-city passes only when at least one side
-  // has been interpreted-open-to the other's city (locationOpenCities), keeping
-  // cross-region matching conservative and opt-in. The matcher never parses the
-  // raw openness prose — only the structured locationOpenCities list.
-  const cityA = a.demographics.city?.toLowerCase().trim();
-  const cityB = b.demographics.city?.toLowerCase().trim();
+  // Same metro is sufficient (MVP). Cross-metro passes only when at least one
+  // side has been interpreted-open-to the other's metro (locationOpenCities),
+  // keeping cross-region matching conservative and opt-in. The matcher never
+  // parses the raw openness prose - only the structured locationOpenCities list.
+  // Both sides are run through normalizeCity so free-text neighborhoods and
+  // state-tagged forms collapse to their canonical metro at read time.
+  const cityA = normalizeCity(a.demographics.city);
+  const cityB = normalizeCity(b.demographics.city);
   if (!cityA || !cityB) return true; // Unknown city passes
   if (cityA === cityB) return true;
 
   const aOpenToB = (a.preferences.locationOpenCities ?? [])
-    .map((c) => c.toLowerCase().trim())
+    .map((c) => normalizeCity(c))
+    .filter((c): c is string => !!c)
     .includes(cityB);
   const bOpenToA = (b.preferences.locationOpenCities ?? [])
-    .map((c) => c.toLowerCase().trim())
+    .map((c) => normalizeCity(c))
+    .filter((c): c is string => !!c)
     .includes(cityA);
   return aOpenToB || bOpenToA;
 }
@@ -294,18 +357,72 @@ function relationshipIntentScore(a: UserProfile, b: UserProfile): number {
   return 0.5;
 }
 
+// Tokens with no discriminating power. A pair sharing ONLY one of these must
+// NOT count as overlapping (calibration guard against over-matching).
+const TAG_STOPWORDS = new Set([
+  "the", "a", "an", "and", "or", "of", "to", "in", "on", "at", "for", "with",
+  "my", "i", "im", "i'm", "love", "like", "enjoy", "really", "very", "lot",
+  "lots", "some", "good", "great", "into", "being", "doing", "stuff", "things",
+]);
+
+/**
+ * Normalize a free-text tag to meaningful tokens. Lowercases, strips
+ * parentheticals ("hiking (Castlewood)" -> "hiking"), strips punctuation,
+ * splits on whitespace, drops stopwords and tokens shorter than 3 chars.
+ * Deterministic. Exported for unit tests.
+ */
+export function tagTokens(raw: unknown): string[] {
+  if (raw == null) return [];
+  let s = String(raw).toLowerCase();
+  s = s.replace(/\([^)]*\)/g, " ");        // drop parentheticals
+  s = s.replace(/[^a-z0-9\s]/g, " ");      // drop punctuation
+  return s
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 3 && !TAG_STOPWORDS.has(t));
+}
+
+/**
+ * Two tags overlap when, after normalization, they share at least one
+ * meaningful token (length >= 3, non-stopword). Token-level containment is
+ * covered by the shared-token rule ("live music" and "music" share "music";
+ * "hiking" and "hiking (Castlewood)" share "hiking"). A single trivial shared
+ * token can never trigger a match because stopwords and <3-char tokens are
+ * already dropped in tagTokens. Deterministic.
+ */
+function tagsOverlap(tokensA: string[], tokensB: string[]): boolean {
+  if (tokensA.length === 0 || tokensB.length === 0) return false;
+  const setB = new Set(tokensB);
+  return tokensA.some((t) => setB.has(t));
+}
+
+/**
+ * Deterministic fuzzy overlap in [0,1]. Two tag LISTS are compared by counting,
+ * for each side, how many of its tags have at least one fuzzy-overlapping tag on
+ * the other side; the score is the symmetric ratio
+ *   (matchedA + matchedB) / (lenA + lenB).
+ * This is a token-aware generalization of Jaccard: identical sets -> 1.0,
+ * disjoint sets -> 0.0, and near-synonyms ("hiking" ~ "hiking (Castlewood)")
+ * count as hits. Calibrated against over-matching: trivial/short/stopword tokens
+ * are stripped before comparison, so unrelated tags score 0.
+ */
+export function fuzzyOverlapScore(rawA: string[], rawB: string[]): number {
+  const a = (rawA ?? []).map(tagTokens).filter((t) => t.length > 0);
+  const b = (rawB ?? []).map(tagTokens).filter((t) => t.length > 0);
+  if (a.length === 0 || b.length === 0) return 0;
+  let matchedA = 0;
+  for (const ta of a) if (b.some((tb) => tagsOverlap(ta, tb))) matchedA++;
+  let matchedB = 0;
+  for (const tb of b) if (a.some((ta) => tagsOverlap(ta, tb))) matchedB++;
+  return (matchedA + matchedB) / (a.length + b.length);
+}
+
 function sharedInterestScore(a: UserProfile, b: UserProfile): number {
-  return jaccardSimilarity(
-    new Set((a.personality.interests ?? []).map((s) => s.toLowerCase())),
-    new Set((b.personality.interests ?? []).map((s) => s.toLowerCase()))
-  );
+  return fuzzyOverlapScore(a.personality.interests ?? [], b.personality.interests ?? []);
 }
 
 function sharedValueScore(a: UserProfile, b: UserProfile): number {
-  return jaccardSimilarity(
-    new Set((a.personality.values ?? []).map((s) => s.toLowerCase())),
-    new Set((b.personality.values ?? []).map((s) => s.toLowerCase()))
-  );
+  return fuzzyOverlapScore(a.personality.values ?? [], b.personality.values ?? []);
 }
 
 function personalityComplementScore(a: UserProfile, b: UserProfile): number {
@@ -341,11 +458,4 @@ function personalityComplementScore(a: UserProfile, b: UserProfile): number {
   if (hasIntrovert && hasExtrovert) score += 0.1;
 
   return Math.min(score, 1.0);
-}
-
-function jaccardSimilarity(setA: Set<string>, setB: Set<string>): number {
-  if (setA.size === 0 && setB.size === 0) return 0;
-  const intersection = new Set([...setA].filter((x) => setB.has(x)));
-  const union = new Set([...setA, ...setB]);
-  return intersection.size / union.size;
 }

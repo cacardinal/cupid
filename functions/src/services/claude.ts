@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { sanitizeProfileValue } from "./outboundSecurity";
-import { normalizeGenderTerm } from "../scheduler/matchingJob";
+import { normalizeGenderTerm, normalizeCity } from "../scheduler/matchingJob";
 import { UserProfile, ConversationTurn, OnboardingStage } from "../models/user";
 import {
   buildOnboardingSystemPrompt,
@@ -498,7 +498,9 @@ export function mergeProfileUpdates(
     merged.demographics = { ...profile.demographics };
     for (const [k, v] of Object.entries(demo)) {
       if (v !== null && v !== undefined) {
-        (merged.demographics as Record<string, unknown>)[k] = sanitizeProfileValue(v);
+        const sanitized = sanitizeProfileValue(v);
+        (merged.demographics as Record<string, unknown>)[k] =
+          k === "city" ? (normalizeCity(sanitized) ?? sanitized) : sanitized;
       }
     }
   }

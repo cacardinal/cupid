@@ -17,7 +17,9 @@ export interface MatchingRunSummary {
 // Instant matching uses a higher confidence bar than the nightly sweep: a
 // real-time intro should only fire when we're genuinely sure, not just when a
 // pair clears the batch minimum.
-export const INSTANT_MATCH_MIN_SCORE = 70;
+// 70 -> 55: instant stays a higher bar than nightly (40) but no longer
+// unreachable given mid-40s soft-score caps.
+export const INSTANT_MATCH_MIN_SCORE = 55;
 
 import type { MatchPair } from "./matchingJob";
 
@@ -282,12 +284,12 @@ export async function reassessMatchPool(phoneHash: string): Promise<ReassessResu
  */
 export async function runNightlyMatching(): Promise<MatchingRunSummary> {
   const { getUsersWithoutRecentMatch } = await import("../services/firestore");
-  const { findTopMatches } = await import("./matchingJob");
+  const { findTopMatches, NIGHTLY_MATCH_MIN_SCORE } = await import("./matchingJob");
 
   const users = await getUsersWithoutRecentMatch(24);
   functions.logger.info(`Found ${users.length} eligible users for matching`);
 
-  const pairs = findTopMatches(users, 50, 1);
+  const pairs = findTopMatches(users, NIGHTLY_MATCH_MIN_SCORE, 1);
   functions.logger.info(`Found ${pairs.length} match pairs`);
 
   const summary: MatchingRunSummary = {

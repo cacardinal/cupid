@@ -6,7 +6,12 @@ import {
   locationMatch,
   isPairBlocked,
   CompatibilityResult,
+  fuzzyOverlapScore,
+  tagTokens,
+  normalizeCity,
+  NIGHTLY_MATCH_MIN_SCORE,
 } from "../scheduler/matchingJob";
+import { INSTANT_MATCH_MIN_SCORE } from "../scheduler/jobs";
 
 // ─── Test fixtures ────────────────────────────────────────────────────────────
 
@@ -507,5 +512,123 @@ describe("findTopMatches re-match avoidance", () => {
     const [a, b] = makeCompatibleMalePair();
     const pairs = findTopMatches([a, b], 1);
     expect(pairs).toHaveLength(1);
+  });
+});
+
+describe("fuzzyOverlapScore + tag normalization", () => {
+  test("near-synonym tags overlap (hiking ~ hiking parenthetical)", () => {
+    expect(fuzzyOverlapScore(["hiking (Castlewood)"], ["hiking"])).toBeGreaterThan(0);
+    expect(fuzzyOverlapScore(["hiking (Castlewood)"], ["hiking"])).toBe(1.0);
+  });
+
+  test("token-containment overlaps (live music ~ music)", () => {
+    expect(fuzzyOverlapScore(["live music"], ["music"])).toBeGreaterThan(0);
+  });
+
+  test("unrelated tags do not overlap (no over-match)", () => {
+    expect(fuzzyOverlapScore(["hiking"], ["accounting"])).toBe(0);
+  });
+
+  test("a trivial shared stopword never counts", () => {
+    expect(fuzzyOverlapScore(["the gym"], ["the office"])).toBe(0);
+  });
+
+  test("empty lists score 0", () => {
+    expect(fuzzyOverlapScore([], ["hiking"])).toBe(0);
+    expect(fuzzyOverlapScore([], [])).toBe(0);
+  });
+
+  test("identical sets score 1; partial overlap lands strictly between", () => {
+    expect(fuzzyOverlapScore(["hiking", "cooking"], ["hiking", "cooking"])).toBe(1);
+    const partial = fuzzyOverlapScore(
+      ["cooking", "hiking", "reading"],
+      ["hiking (Castlewood)", "camping"]
+    );
+    expect(partial).toBeGreaterThan(0);
+    expect(partial).toBeLessThan(1);
+    expect(partial).toBeCloseTo(0.4, 5);
+  });
+
+  test("tagTokens strips parentheticals and punctuation", () => {
+    expect(tagTokens("hiking (Castlewood)!")).toEqual(["hiking"]);
+    expect(tagTokens("the and of")).toEqual([]);
+  });
+});
+
+describe("thresholds", () => {
+  test("nightly min score is 40", () => {
+    expect(NIGHTLY_MATCH_MIN_SCORE).toBe(40);
+  });
+
+  test("instant min score is 55", () => {
+    expect(INSTANT_MATCH_MIN_SCORE).toBe(55);
+  });
+});
+
+describe("normalizeCity", () => {
+  test("neighborhood + state suffix collapses to st. louis", () => {
+    expect(normalizeCity("tower grove, st. louis, mo")).toBe("st. louis");
+  });
+
+  test("suburb and abbreviations map to st. louis", () => {
+    expect(normalizeCity("Clayton")).toBe("st. louis");
+    expect(normalizeCity("STL")).toBe("st. louis");
+    expect(normalizeCity("University City")).toBe("st. louis");
+  });
+
+  test("kansas city aliases map to kansas city", () => {
+    expect(normalizeCity("Overland Park, KS")).toBe("kansas city");
+    expect(normalizeCity("KCMO")).toBe("kansas city");
+  });
+
+  test("metros stay distinct", () => {
+    expect(normalizeCity("st. louis")).not.toBe(normalizeCity("kansas city"));
+  });
+
+  test("unknown city passes through lowercased", () => {
+    expect(normalizeCity("Chicago")).toBe("chicago");
+  });
+
+  test("conservative: known-state city not in alias set is not mapped to a metro", () => {
+    expect(normalizeCity("Springfield, MO")).toBe("springfield");
+  });
+
+  test("empty and null return null", () => {
+    expect(normalizeCity("")).toBeNull();
+    expect(normalizeCity(null)).toBeNull();
+  });
+});
+
+describe("locationMatch with city normalization", () => {
+  test("neighborhood and suburb in same metro match", () => {
+    const a = makeUser({ demographics: { city: "Tower Grove, St. Louis, MO" } });
+    const b = makeUser({ demographics: { city: "Clayton" } });
+    expect(locationMatch(a, b)).toBe(true);
+  });
+
+  test("distinct metros do not match", () => {
+    const a = makeUser({ demographics: { city: "st. louis" } });
+    const b = makeUser({ demographics: { city: "kansas city" } });
+    expect(locationMatch(a, b)).toBe(false);
+  });
+});
+
+describe("pairwise sanity (clearly-compatible pair clears the gate)", () => {
+  test("same metro, hetero-compatible, long-term, real overlap scores above 40", () => {
+    const a = makeUser({
+      phoneHash: "hash_sanity_a",
+      demographics: { age: 30, gender: "woman", city: "Tower Grove, St. Louis", orientation: "straight" },
+      preferences: { ageMin: 28, ageMax: 40, genderPreference: ["man"], relationshipIntent: "long-term", dealbreakers: [] },
+      personality: { interests: ["hiking (Castlewood)", "cooking"], values: ["family", "honesty"], personalityTraits: ["introvert"] },
+    });
+    const b = makeUser({
+      phoneHash: "hash_sanity_b",
+      demographics: { age: 33, gender: "man", city: "st. louis", orientation: "straight" },
+      preferences: { ageMin: 28, ageMax: 38, genderPreference: ["woman"], relationshipIntent: "long-term", dealbreakers: [] },
+      personality: { interests: ["hiking", "cooking"], values: ["family", "faith"], personalityTraits: ["extrovert"] },
+    });
+    const r = computeCompatibility(a, b);
+    expect(r.passed).toBe(true);
+    expect(r.score).toBeGreaterThan(40);
   });
 });
