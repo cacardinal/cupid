@@ -145,10 +145,32 @@ export function findTopMatches(
 
 // ─── Scoring functions ────────────────────────────────────────────────────────
 
+/**
+ * Normalize gender vocabulary to a canonical term. The model extracts gender
+ * preference in mixed forms ("men"/"man"/"male", "women"/"woman"/"female",
+ * "any"/"anyone") while demographics.gender is the singular enum. Without this,
+ * a woman who wants "men" never matched a "man" (exact-string includes), which
+ * blocked ~92% of pairs on gender and was the true cause of zero matches across
+ * the early waves. Returns "man" | "woman" | "non-binary" | "any" | the raw
+ * lowercased term, or null.
+ */
+export function normalizeGenderTerm(raw: unknown): string | null {
+  if (raw == null) return null;
+  const s = String(raw).toLowerCase().trim();
+  if (!s) return null;
+  if (["man", "men", "male", "males", "guy", "guys", "m"].includes(s)) return "man";
+  if (["woman", "women", "female", "females", "girl", "girls", "lady", "ladies", "f", "w"].includes(s)) return "woman";
+  if (["non-binary", "nonbinary", "non binary", "enby", "nb"].includes(s)) return "non-binary";
+  if (["any", "anyone", "all", "everyone", "either", "both", "whoever", "open", "no preference"].includes(s)) return "any";
+  return s;
+}
+
 function genderPreferenceMatch(seeker: UserProfile, candidate: UserProfile): boolean {
-  const prefs = seeker.preferences.genderPreference;
-  if (!prefs || prefs.length === 0) return true; // No preference = accepts all
-  const candidateGender = candidate.demographics.gender;
+  const prefs = (seeker.preferences.genderPreference ?? [])
+    .map(normalizeGenderTerm)
+    .filter((g): g is string => !!g);
+  if (prefs.length === 0 || prefs.includes("any")) return true; // No/open preference = accepts all
+  const candidateGender = normalizeGenderTerm(candidate.demographics.gender);
   if (!candidateGender) return true; // Unknown gender passes (err toward inclusivity)
   return prefs.includes(candidateGender);
 }

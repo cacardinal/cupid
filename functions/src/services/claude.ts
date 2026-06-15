@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { sanitizeProfileValue } from "./outboundSecurity";
+import { normalizeGenderTerm } from "../scheduler/matchingJob";
 import { UserProfile, ConversationTurn, OnboardingStage } from "../models/user";
 import {
   buildOnboardingSystemPrompt,
@@ -384,14 +385,24 @@ const ARRAY_PROFILE_FIELDS = new Set([
 
 function coerceArrayField(key: string, value: unknown): unknown {
   if (!ARRAY_PROFILE_FIELDS.has(key)) return value;
-  if (Array.isArray(value)) return value;
-  if (typeof value === "string") {
-    return value
-      .split(/[,;]+/)
-      .map((s) => s.trim())
-      .filter(Boolean);
+  let arr: unknown[];
+  if (Array.isArray(value)) {
+    arr = value;
+  } else if (typeof value === "string") {
+    arr = value.split(/[,;]+/).map((s) => s.trim()).filter(Boolean);
+  } else {
+    arr = [value];
   }
-  return [value];
+  // Canonicalize gender preference vocabulary at write time ("men" -> "man",
+  // "women" -> "woman", "any" -> dropped = open) so it matches the singular
+  // gender enum the matcher compares against. Matcher also normalizes at read
+  // time; this keeps stored data clean going forward.
+  if (key === "genderPreference") {
+    arr = arr
+      .map((g) => normalizeGenderTerm(g))
+      .filter((g): g is string => !!g && g !== "any");
+  }
+  return arr;
 }
 
 export function mergeProfileUpdates(

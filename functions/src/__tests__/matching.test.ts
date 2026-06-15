@@ -432,3 +432,28 @@ describe("findTopMatches", () => {
     expect(matches).toHaveLength(0);
   });
 });
+
+describe("gender vocabulary normalization (zero-match root cause)", () => {
+  const { normalizeGenderTerm } = require("../scheduler/matchingJob");
+  test("plural/synonym forms map to the singular gender enum", () => {
+    expect(normalizeGenderTerm("men")).toBe("man");
+    expect(normalizeGenderTerm("women")).toBe("woman");
+    expect(normalizeGenderTerm("Male")).toBe("man");
+    expect(normalizeGenderTerm("females")).toBe("woman");
+    expect(normalizeGenderTerm("anyone")).toBe("any");
+    expect(normalizeGenderTerm("man")).toBe("man");
+  });
+  test("a woman wanting 'men' matches a man (was blocked before)", () => {
+    const { computeCompatibility } = require("../scheduler/matchingJob");
+    const base = (gender: string, pref: string): any => ({
+      phoneHash: gender + pref, active: true, onboardingComplete: true,
+      demographics: { age: 30, gender, city: "st. louis", orientation: "straight" },
+      preferences: { ageMin: 25, ageMax: 40, genderPreference: [pref], relationshipIntent: "long-term", dealbreakers: [] },
+      personality: { interests: ["hiking"], values: ["honesty"] },
+    });
+    const woman = base("woman", "men");
+    const man = base("man", "women");
+    const r = computeCompatibility(woman, man);
+    expect(r.passed).toBe(true);
+  });
+});
