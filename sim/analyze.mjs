@@ -35,7 +35,7 @@ const usersById={}; for(const u of users) usersById[u.id]=u;
 const { computeCompatibility } = await import("../functions/lib/scheduler/matchingJob.js");
 // Post-match lifecycle status sets. A "debriefing" or "feedback_given" match
 // means the pair dated; "no_fit" is a warm terminal exit after a date.
-const SCHED=["scheduled","video_sent","debriefing","video_expired","feedback_given","no_fit","contact_shared","contact_declined"];
+const SCHED=["scheduling","scheduled","video_sent","debriefing","video_expired","feedback_given","no_fit","contact_shared","contact_declined"];
 const DATED=["video_sent","debriefing","video_expired","feedback_given","no_fit","contact_shared","contact_declined"];
 for(const u of simUsers){
   const ms=(await(await fetch(`${FS}/users/${u.id}/matches?pageSize=20`,{headers:H})).json()).documents?.map(d=>dec(d.fields))??[];

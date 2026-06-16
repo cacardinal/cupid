@@ -19,6 +19,14 @@ const FIT_PROBABILITY = +(process.env.FIT_PROBABILITY ?? 0.2);
 // Per-step burst cap (shared bridge slots). Raised from 12 so more personas
 // advance per tick; overridable to dial back on Anthropic 429s.
 const BURST = +(process.env.BURST ?? 16);
+// How often (in VIRTUAL minutes) the lifecycle jobs fire — matching, scheduled
+// dates, video expiry/debrief, engagement review, drain. Default 1440 = once per
+// virtual day (original behavior). Lower it (e.g. 180) on a SEEDED pool so the
+// post-match lifecycle advances every few virtual hours instead of once a day,
+// which is what lets a pre-onboarded fold complete the full back half in minutes.
+// runMatching's own 24h "no recent match" cooldown prevents re-proposing the
+// same users when this fires sub-daily; the other jobs are idempotent/status-gated.
+const JOB_INTERVAL = +(process.env.JOB_INTERVAL_VMIN ?? 1440);
 const RATIO = (VDAYS*24*60) / (WALL*60); // virtual minutes per wall minute
 const FNS="http://127.0.0.1:5001/cupid-dating-mvp/us-central1";
 const FS=`http://127.0.0.1:8080/v1/projects/cupid-dating-mvp/databases/(default)/documents`;
@@ -43,14 +51,21 @@ if(APPEND){
 }
 fs.writeFileSync(path.join(DIR,"state",`wave-${WAVE}-personas.txt`),path.resolve(pfile));
 
-// Launch curve: 50% arrive day 1-2 (exp decay), rest spread, referral bumps ignored v1
+// SEEDED mode: the pool was pre-onboarded directly into Firestore (sim/seed via
+// functions/seed-pool.mjs), so personas must NOT re-run the onboarding opener.
+// They start polling near v0 and only ever REACT to a Cupid message (a proposal,
+// slot offer, or debrief prompt). This is what lets a fold spend its whole wall
+// budget on the post-match lifecycle instead of re-onboarding everyone.
+const SEEDED = !!(args.seeded || process.env.SEEDED);
+// Launch curve: 50% arrive day 1-2 (exp decay), rest spread, referral bumps ignored v1.
+// Seeded personas are all "present" immediately (small jitter) and wait reactively.
 for (const p of personas) {
   const r=rnd();
-  p.arrivalVmin = r<0.5 ? rnd()*2*1440 : 2*1440 + rnd()*(VDAYS-2)*1440*0.9;
+  p.arrivalVmin = SEEDED ? rnd()*60 : (r<0.5 ? rnd()*2*1440 : 2*1440 + rnd()*(VDAYS-2)*1440*0.9);
   p.state={turns:0,dropped:false,lastSeen:{}};
 }
-const events=personas.map(p=>({t:p.arrivalVmin,type:"persona_turn",p,first:true}));
-let vnow=0, lastDay=-1;
+const events=personas.map(p=>({t:p.arrivalVmin,type:"persona_turn",p,first:!SEEDED}));
+let vnow=0, lastJobAt=0;
 const log=(m)=>console.log(`[v${(vnow/1440).toFixed(2)}d] ${m}`);
 
 async function outboxFor(phone, sinceIso){
@@ -118,6 +133,12 @@ async function tick(ev){
   if(p.state.dropped) return;
   try{
     const hist=await conversationHistory(p);
+    if(SEEDED && (!hist.length || hist[hist.length-1].role!=="user")) {
+      // seeded pool never initiates; it only replies to a PENDING Cupid message
+      // (last turn role "user" = a Cupid text awaiting a response). Empty history
+      // or own-last-turn means nothing to react to yet, so just keep polling.
+      events.push({t:vnow+30,type:"persona_turn",p}); return;
+    }
     if(!ev.first && hist.length && hist[hist.length-1].role==="assistant") {
       // no new Cupid message yet; re-check later (no hazard roll while waiting —
       // wave-1 bug: rolling on every poll killed 46% of personas in the reply queue)
@@ -158,8 +179,7 @@ const t0=Date.now(); const endV=VDAYS*1440;
 log(`wave ${WAVE}: ${USERS} users, ${VDAYS} vdays in ${WALL}h wall (ratio ${RATIO.toFixed(0)}x)`);
 while(vnow<endV){
   vnow=((Date.now()-t0)/60000)*RATIO;
-  const day=Math.floor(vnow/1440);
-  if(day>lastDay){ lastDay=day; if(day>0) await dailyJobs(day); }
+  if(vnow>0 && (vnow-lastJobAt)>=JOB_INTERVAL){ lastJobAt+=JOB_INTERVAL; await dailyJobs(Math.floor(vnow/1440)); }
   const due=events.filter(e=>e.t<=vnow); 
   for(const e of due){ events.splice(events.indexOf(e),1); }
   await Promise.all(due.slice(0,BURST).map(tick)); // cap burst (env BURST)
