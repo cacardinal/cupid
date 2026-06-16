@@ -190,8 +190,17 @@ export const proactiveStatusUpdates = functions
 // Lets the local demo harness trigger scheduled jobs on demand.
 // Hard-disabled unless DEMO_MODE=true (never set in production config).
 
+// demoAdmin orchestrates the same pipeline jobs as the scheduled functions
+// (runNightlyMatching, runEngagementReview, etc.), every one of which declares
+// ALL_SECRETS. It MUST run with the identical secret env or it operates on a
+// different PHONE_ENCRYPTION_KEY than the encrypt path (smsWebhook): phones get
+// encrypted under the bound secret but getPhoneByHash here would fall back to
+// the .env.local value, GCM-auth-fail, return null, and silently DROP every
+// match-proposal SMS (proposeMatchPair guards send on a non-null phone). That
+// killed the back half of the sim funnel for ~15 waves. Prod is unaffected
+// (demoAdmin is DEMO_MODE-gated) but the binding is correct regardless.
 export const demoAdmin = functions
-  .runWith({ timeoutSeconds: 540, memory: "1GB" })
+  .runWith({ timeoutSeconds: 540, memory: "1GB", secrets: ALL_SECRETS })
   .https.onRequest(async (req, res) => {
     if (process.env.DEMO_MODE !== "true") {
       res.status(403).json({ error: "demoAdmin is disabled outside demo mode" });

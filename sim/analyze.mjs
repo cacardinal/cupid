@@ -24,6 +24,14 @@ const simUsers=users.filter(u=>byHash[u.id]);
 // Funnel
 const funnel={arrived:personas.length,profileCreated:simUsers.length,onboarded:simUsers.filter(u=>u.onboardingComplete).length};
 let matched=0,accepted=0,scheduled=0,dated=0,feedbackGiven=0,noFit=0,exchanged=0,oracle=[],violations=0;
+// Matcher self-consistency: re-score each proposed pair on the SAME stored
+// (extracted) profiles the matcher actually used. The matcher only proposes
+// pairs that pass its own hard filters, so this MUST be 0 — any nonzero is a
+// real matcher bug. Contrast with `violations` (re-score on GROUND TRUTH),
+// which is nonzero whenever extraction drifted on a hard-gate field (age,
+// gender, dealbreaker) and is an extraction-accuracy signal, not a matcher bug.
+let storedViolations=0,storedChecked=0;
+const usersById={}; for(const u of users) usersById[u.id]=u;
 const { computeCompatibility } = await import("../functions/lib/scheduler/matchingJob.js");
 // Post-match lifecycle status sets. A "debriefing" or "feedback_given" match
 // means the pair dated; "no_fit" is a warm terminal exit after a date.
@@ -44,6 +52,16 @@ for(const u of simUsers){
       const gt=(p)=>({phoneHash:p.hash,demographics:{age:p.groundTruth.age,gender:p.groundTruth.gender,city:"st. louis"},preferences:{ageMin:p.groundTruth.ageMin,ageMax:p.groundTruth.ageMax,genderPreference:p.groundTruth.genderPreference,relationshipIntent:p.groundTruth.relationshipIntent,dealbreakers:p.groundTruth.dealbreakers},personality:{interests:p.groundTruth.interests,values:p.groundTruth.values,humorStyle:p.groundTruth.humorStyle,communicationStyle:p.groundTruth.communicationStyle,personalityTraits:p.groundTruth.smoker?["smoker"]:[],wantsKids:p.groundTruth.wantsKids}});
       const r=computeCompatibility(gt(byHash[u.id]),gt(other));
       oracle.push(r.score); if(!r.passed)violations++;
+      // Stored-profile self-consistency (matcher-bug detector). Guarded: a
+      // missing/odd stored doc must degrade silently, never abort the report.
+      try{
+        const so=usersById[m.matchedUserId], su=usersById[u.id];
+        if(so&&su&&su.demographics&&so.demographics){
+          const sp=(x)=>({phoneHash:x.id,demographics:x.demographics??{},preferences:x.preferences??{},personality:x.personality??{}});
+          const rs=computeCompatibility(sp(su),sp(so));
+          storedChecked++; if(!rs.passed)storedViolations++;
+        }
+      }catch{/* stored self-check unavailable for this pair */}
     }
   }
 }
@@ -142,7 +160,9 @@ arrived ${funnel.arrived} -> profiles ${funnel.profileCreated} -> onboarded ${fu
 ## Extraction accuracy (vs ground truth)
 age exact: ${pct(acc.age)} | intent: ${pct(acc.relationshipIntent)} | interests precision avg: ${acc.interests.length?Math.round(100*acc.interests.reduce((a,b)=>a+b,0)/acc.interests.length)+"%":"n/a"} | dealbreaker captured: ${pct(acc.dealbreakers)}
 ## Match quality
-proposed pairs oracle scores: ${oracle.length?`avg ${Math.round(oracle.reduce((a,b)=>a+b,0)/oracle.length)} min ${Math.min(...oracle)} max ${Math.max(...oracle)}`:"none"} | dealbreaker violations: ${violations} (MUST be 0)
+proposed pairs oracle scores: ${oracle.length?`avg ${Math.round(oracle.reduce((a,b)=>a+b,0)/oracle.length)} min ${Math.min(...oracle)} max ${Math.max(...oracle)}`:"none"}
+matcher self-consistency (stored profiles): ${storedViolations} violations / ${storedChecked} checked (MUST be 0 — nonzero = real matcher hard-filter bug)
+ground-truth hard-filter drift: ${violations} (proposed pairs that fail a hard filter when re-scored on persona ground truth; nonzero = extraction drift on age/gender/dealbreaker, NOT a matcher bug)
 ${archetypeSection}${injectionSection}## Voice audit (${voice.msgs} Cupid msgs)
 em/en dashes: ${voice.emdash} (MUST be 0) | AI-isms: ${voice.aiisms} | avg length: ${voice.avgLen} chars
 judge (${JUDGE} sampled): ${judgeAvg}
