@@ -91,10 +91,19 @@ TEXTING STYLE: ${b.msgLen} messages${b.lowercase?", mostly lowercase":""}${b.emo
 MOVING THROUGH THE FLOW: if Cupid offers a few date times numbered 1, 2, 3, reply with just the number that works (or "none" if truly none do). If Cupid sends a video link, acknowledge it briefly like you're about to hop on. After a video date, Cupid will check in to hear how it went, answer naturally over a couple of messages.${fitLine}
 BEHAVE LIKE A REAL PERSON: ${b.guardedness>0.6?"guarded at first, warm up slowly":"open and chatty"}. Sometimes answer partially, ask questions back, occasionally go off topic. If asked yes/no about meeting someone, your enthusiasm depends on how appealing they sound (your bar: ${b.agreeableness}). NEVER mention being simulated. Reply with ONLY your next text message.`;
 }
+// Client-side timeout (ms) on the bridge fetch. Without this, a single wedged
+// `claude -p` call freezes the whole virtual clock forever (Promise.all in step
+// never resolves — this hung wave 18 for 9h). On timeout we throw, which the
+// tick() catch treats like any persona error: log + requeue, don't block.
+const BRIDGE_TIMEOUT_MS = +(process.env.BRIDGE_TIMEOUT_MS ?? 75000);
 async function personaReply(p,history){
-  const res=await fetch(BRIDGE,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"haiku",max_tokens:150,system:personaSystem(p),messages:history.length?history:[{role:"user",content:"(You just saw an ad: 'Text Cupid, the matchmaker in your texts.' Send your first message.)"}],_job:"sim-persona"})});
-  if(!res.ok) throw new Error(await res.text());
-  return (await res.json()).content[0].text.trim();
+  const ctrl=new AbortController();
+  const timer=setTimeout(()=>ctrl.abort(),BRIDGE_TIMEOUT_MS);
+  try{
+    const res=await fetch(BRIDGE,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"haiku",max_tokens:150,system:personaSystem(p),messages:history.length?history:[{role:"user",content:"(You just saw an ad: 'Text Cupid, the matchmaker in your texts.' Send your first message.)"}],_job:"sim-persona"}),signal:ctrl.signal});
+    if(!res.ok) throw new Error(await res.text());
+    return (await res.json()).content[0].text.trim();
+  }finally{ clearTimeout(timer); }
 }
 async function conversationHistory(p){
   // persona's view: Cupid msgs are "user", persona's own are "assistant"
