@@ -14,6 +14,13 @@ const TZ_OFFSET_HOURS = 5; // CT = UTC-5 (CDT); fine for launch, revisit for CST
 
 /** Next N evening slots starting tomorrow (never same-day pressure). */
 export function proposeSlots(now: Date = new Date()): Date[] {
+  // DEMO_MODE only: real "tomorrow evening" slots never arrive in a compressed
+  // sim (7 virtual days = a few real hours), so dates never fire and the
+  // video/debrief/exchange lifecycle is untestable. Offer near-term slots so the
+  // scheduled-date job opens the room within the run. Production cadence below.
+  if (process.env.DEMO_MODE === "true") {
+    return [2, 4, 6].map((min) => new Date(now.getTime() + min * 60_000));
+  }
   const slots: Date[] = [];
   let dayOffset = 1;
   while (slots.length < SLOT_COUNT) {
