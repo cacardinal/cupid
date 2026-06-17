@@ -435,14 +435,22 @@ async function handleMatchResponse(
         await blockPair(phoneHash, otherHash, "declined");
         await sendSms(
           phone,
-          "They're not feeling it on their end, so I won't push it. I'll keep looking for you."
+          await generateVoicedMessage(
+            profile,
+            "They just said yes to meeting their match, but the other person had already passed. Gently let them know it is not happening this time, no big deal, and that you are still looking for them.",
+            "They'd already passed on their end, so this one won't happen. I'm still looking for you."
+          )
         );
       } else if (otherMatchSnap?.userAccepted === true) {
         await startScheduling(phone, phoneHash, matchId, otherHash, otherMatchSnap.id!);
       } else {
         await sendSms(
           phone,
-          "Love the enthusiasm! I'll reach out to them too. I'll let you know as soon as I hear back 🤞"
+          await generateVoicedMessage(
+            profile,
+            "They just said yes to meeting their match. The other person hasn't answered yet. Let them know you're reaching out to the other person and will tell them the moment you hear back. Warm, brief, no pressure.",
+            "You're in. I'll check with them and let you know the moment I hear back."
+          )
         );
       }
     } else if (intent === "no") {
@@ -451,12 +459,16 @@ async function handleMatchResponse(
       void track("match_declined", phoneHash, { matchId }); // analytics
       await sendSms(
         phone,
-        "No problem at all! I'll keep an eye out for better fits. These things take time."
+        await generateVoicedMessage(
+          profile,
+          "They just declined a match you proposed. Acknowledge it easily, no guilt, and let them know you'll keep looking for someone who fits. Brief.",
+          "No worries. I'll keep looking for someone who fits."
+        )
       );
     } else {
       await sendSms(
         phone,
-        "Just to be clear, are you interested in meeting this person? A simple yes or no works."
+        "Just so I've got it right, are you up for meeting this person? Yes or no works."
       );
     }
   } else if (matchRecord.status === "video_expired") {
@@ -476,7 +488,7 @@ async function handleMatchResponse(
         // number is sent, fetched at send time and never stored or logged.
         await performContactSwap(phone, phoneHash, otherHash, matchId);
       } else {
-        await sendSms(phone, "Got it. Waiting to hear back from them, I'll let you know.");
+        await sendSms(phone, "Got it. I'll let you know as soon as I hear from them.");
       }
     } else if (intent === "no") {
       await updateMatchRecord(phoneHash, matchId, { status: "contact_declined" });
@@ -595,7 +607,7 @@ async function handleDebriefReply(
  * fit==="positive" does Cupid send the swap-numbers offer (both -> video_expired).
  * Any non-positive read on either side ends both as no_fit and blocks the pair.
  */
-async function maybeOfferContactExchange(
+export async function maybeOfferContactExchange(
   thisHash: string,
   otherHash: string,
   thisMatchId: string
@@ -606,7 +618,19 @@ async function maybeOfferContactExchange(
   if (!other || other.status !== "feedback_given") {
     const thisPhone = await getPhoneByHash(thisHash);
     if (thisPhone) {
-      await sendSms(thisPhone, "Thanks for the rundown. Let me check in with them and I'll be back.");
+      const thisProfile = await getUser(thisHash);
+      const holding =
+        "Thanks for telling me. Let me check in with them and I'll come back to you.";
+      await sendSms(
+        thisPhone,
+        thisProfile
+          ? await generateVoicedMessage(
+              thisProfile,
+              "They just finished telling you about their video date. You need to hear from the other person before any next step. Thank them for the rundown and let them know you'll be back after you check in with the other person.",
+              holding
+            )
+          : holding
+      );
     }
     return;
   }
@@ -625,7 +649,8 @@ async function maybeOfferContactExchange(
       updateMatchRecord(thisHash, thisMatchId, { status: "video_expired" }),
       updateMatchRecord(otherHash, other.id!, { status: "video_expired" }),
     ]);
-    const offer = "You both came away wanting more. Want me to pass along numbers so you can take it from here? (yes/no)";
+    // Static + parseable: this asks for a yes/no the intent classifier reads.
+    const offer = "You both came away wanting to keep talking. Want me to share numbers so you can take it from here? Yes or no.";
     await Promise.all([
       thisPhone ? sendSms(thisPhone, offer) : Promise.resolve(),
       otherPhone ? sendSms(otherPhone, offer) : Promise.resolve(),
@@ -639,10 +664,18 @@ async function maybeOfferContactExchange(
     updateMatchStatus(otherHash, other.id!, "no_fit"),
   ]);
   await blockPair(thisHash, otherHash, "no_fit");
-  const noFit = "Sounds like this one wasn't the match. That's good to know, it sharpens what I'm looking for. More soon.";
+  const noFitFallback =
+    "Sounds like this one wasn't it. That tells me something useful for next time. I'll keep looking.";
+  const noFitSituation =
+    "Their video date happened but it wasn't a match for one or both of them. Close it out warmly and honestly, note that knowing what doesn't fit helps you find what does, and that you'll keep looking. No blame.";
+  const [thisProfile, otherProfile] = await Promise.all([getUser(thisHash), getUser(otherHash)]);
   await Promise.all([
-    thisPhone ? sendSms(thisPhone, noFit) : Promise.resolve(),
-    otherPhone ? sendSms(otherPhone, noFit) : Promise.resolve(),
+    thisPhone
+      ? sendSms(thisPhone, thisProfile ? await generateVoicedMessage(thisProfile, noFitSituation, noFitFallback) : noFitFallback)
+      : Promise.resolve(),
+    otherPhone
+      ? sendSms(otherPhone, otherProfile ? await generateVoicedMessage(otherProfile, noFitSituation, noFitFallback) : noFitFallback)
+      : Promise.resolve(),
   ]);
 }
 
@@ -718,7 +751,14 @@ async function handleReactivation(phone: string, profile: UserProfile): Promise<
     .then(({ attemptInstantMatch }) => attemptInstantMatch(profile.phoneHash))
     .catch((err) => functions.logger.error("Reactivation re-queue failed", err));
 
-  await sendSms(phone, "Ok, I'll see if they're open to another go and circle back.");
+  await sendSms(
+    phone,
+    await generateVoicedMessage(
+      profile,
+      "They want to revisit a match that was set aside earlier. Let them know you'll check whether the other person is still open to it and circle back. Brief, warm.",
+      "I'll see if they're still open to it and let you know."
+    )
+  );
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -794,10 +834,10 @@ async function handleSchedulingReply(
         other ? updateMatchRecord(otherHash, other.id!, { proposedSlots: slotTs, slotPickedBy: "" }) : null,
       ]);
       await sendSms(phone, "No problem — pick one that works for you:\n\n" + slotsMessage(slots));
-      if (otherPhone) await sendSms(otherPhone, "That time didn't work for them — finding another. Hang tight!");
+      if (otherPhone) await sendSms(otherPhone, "That time didn't work on their end. Finding another now.");
       return;
     }
-    await sendSms(phone, `Does ${formatSlotCT(matchRecord.scheduledAt.toDate())} work for you? A simple yes or no does it.`);
+    await sendSms(phone, `Does ${formatSlotCT(matchRecord.scheduledAt.toDate())} work for you? Yes or no.`);
     return;
   }
 
@@ -812,12 +852,12 @@ async function handleSchedulingReply(
       updateMatchRecord(phoneHash, matchId, { proposedSlots: slotTs }),
       other ? updateMatchRecord(otherHash, other.id!, { proposedSlots: slotTs }) : null,
     ]);
-    await sendSms(phone, "All good — how about these instead?\n\n" + slotsMessage(fresh));
+    await sendSms(phone, "All good, how about these instead?\n\n" + slotsMessage(fresh));
     return;
   }
 
   if (choice === null || !slots[choice]) {
-    await sendSms(phone, "Just reply 1, 2, or 3 to pick a time — or \"none\" if they don't work.");
+    await sendSms(phone, "Just reply 1, 2, or 3 to pick a time, or \"none\" if they don't work.");
     return;
   }
 
@@ -827,9 +867,9 @@ async function handleSchedulingReply(
     updateMatchRecord(phoneHash, matchId, { scheduledAt: pickedTs, slotPickedBy: phoneHash }),
     other ? updateMatchRecord(otherHash, other.id!, { scheduledAt: pickedTs, slotPickedBy: phoneHash }) : null,
   ]);
-  await sendSms(phone, `${formatSlotCT(picked)} — nice choice. Checking with your match now 🤞`);
+  await sendSms(phone, `${formatSlotCT(picked)}, nice choice. Checking with them now.`);
   if (otherPhone) {
-    await sendSms(otherPhone, `Your match suggested ${formatSlotCT(picked)} for your video date. Does that work? (yes/no)`);
+    await sendSms(otherPhone, `Your match suggested ${formatSlotCT(picked)} for your video date. Does that work for you? Yes or no.`);
   }
 }
 

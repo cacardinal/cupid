@@ -199,9 +199,10 @@ describe("mutual-decline gate", () => {
       (c) => (c[1] as { blockedMatches?: unknown }).blockedMatches !== undefined
     );
     expect(blockWrites.length).toBe(2);
-    // The "not feeling it" line was sent and no slots message.
+    // The mutual-decline line is now voiced (LLM), and no slots message went out.
     const sent = twilio.sendSms.mock.calls.map((c) => String(c[1]));
-    expect(sent.some((m) => /not feeling it/i.test(m))).toBe(true);
+    expect(claude.generateVoicedMessage).toHaveBeenCalled();
+    expect(sent.some((m) => /find a time/i.test(m))).toBe(false);
   });
 });
 

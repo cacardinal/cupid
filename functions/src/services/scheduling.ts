@@ -52,9 +52,9 @@ export function formatSlotCT(d: Date): string {
 export function slotsMessage(slots: Date[]): string {
   const lines = slots.map((s, i) => `${i + 1}) ${formatSlotCT(s)}`);
   return (
-    `You're both in! 🎉 Let's find a time for your video date (15 min, anonymous, no pressure). I can do:\n\n` +
+    `You're both in. Let's find a time for your video date, 15 minutes, anonymous, no pressure. I can do:\n\n` +
     lines.join("\n") +
-    `\n\nReply 1, 2, or 3 — or "none" if none of those work.`
+    `\n\nReply 1, 2, or 3, or "none" if none of those work.`
   );
 }
 
@@ -121,9 +121,9 @@ export function calendarLink(matchId: string, phoneHash: string): string {
 
 export function scheduledConfirmationMessage(scheduledAt: Date, matchId: string, phoneHash: string): string {
   return (
-    `It's a date: ${formatSlotCT(scheduledAt)} 🗓\n\n` +
+    `It's set: ${formatSlotCT(scheduledAt)}.\n\n` +
     `Add it to your calendar: ${calendarLink(matchId, phoneHash)}\n\n` +
-    `I'll text you the video link when the room opens. Don't ghost — I'll know 😉`
+    `I'll text you the video link right when the room opens.`
   );
 }
 

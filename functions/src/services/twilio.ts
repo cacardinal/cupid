@@ -123,11 +123,11 @@ export async function sendVideoRoomLink(
   roomUrl: string,
   otherPersonDescription: string
 ): Promise<string> {
-  const body = `You're both interested! 🎉 Here's your private video link — no names, no pressure, just a quick face-to-face.
+  const body = `Here's your private video link, no names, no pressure, just a quick face to face.
 
 ${roomUrl}
 
-The room is open for 15 minutes. You already know you have great things in common with this person.`;
+The room's open for the next 15 minutes. You two already have real things in common.`;
 
   return sendSms(to, body);
 }
@@ -143,12 +143,12 @@ export async function sendContactExchangeMessage(
   const body = `Here's how to reach ${otherName}:
 ${otherPhone}
 
-Take it from here. Rooting for you both 💫`;
+Take it from here. I'm rooting for you both.`;
   return sendSms(to, body, { allowPhones: [otherPhone] });
 }
 
 export async function sendDeclinedMessage(to: string): Promise<string> {
-  const body = `It wasn't quite the right fit this time — that happens! I'm already thinking about who else might be a great match for you. Stay tuned.`;
+  const body = `Not quite the right fit this time. I'm already thinking about who else could be a good match for you.`;
   return sendSms(to, body);
 }
 

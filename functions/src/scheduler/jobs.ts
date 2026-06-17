@@ -373,7 +373,52 @@ export async function runVideoExpiryFollowUp(force = false): Promise<VideoExpiry
     }
   }
 
+  // Stale-debrief sweep: a debrief left idle (user ghosted, or the model never
+  // landed a confident read) would otherwise freeze the match in "debriefing"
+  // forever. Force-close any debriefing match whose updatedAt is older than
+  // DEBRIEF_STALE_MS (real time — NOT virtual; a virtual threshold never elapses
+  // in a sub-24h fold, the same trap as the match cooldown). An ACTIVE debrief
+  // keeps updatedAt fresh (handleDebriefReply writes it each turn) so only truly
+  // idle debriefs close. We honor any existing fit read, else default "unsure",
+  // then run the normal two-step exchange gate so the pair reaches a terminal.
+  await closeStaleDebriefs(users);
+
   return summary;
+}
+
+/** Prod default 48h; sim sets DEBRIEF_STALE_MS small (e.g. 30000) so idle
+ * debriefs close within a compressed fold. Exported for testing. */
+export async function closeStaleDebriefs(
+  users?: Array<{ phoneHash: string }>
+): Promise<{ closed: number }> {
+  const { getAllActiveUsers, getActiveMatchForUser, updateMatchRecord } = await import("../services/firestore");
+  const staleMs = Number(process.env.DEBRIEF_STALE_MS ?? 48 * 60 * 60 * 1000);
+  const pool = users ?? (await getAllActiveUsers());
+  let closed = 0;
+  for (const user of pool) {
+    try {
+      const match = await getActiveMatchForUser(user.phoneHash);
+      if (!match || match.status !== "debriefing") continue;
+      // Missing updatedAt -> treat as fresh (don't close what we can't age).
+      const last = match.updatedAt?.toMillis?.() ?? Date.now();
+      if (Date.now() - last < staleMs) continue; // still active, let it finish
+      const fit = match.fit ?? "unsure";
+      await updateMatchRecord(user.phoneHash, match.id!, {
+        feedbackGiven: true,
+        fit,
+        status: "feedback_given",
+      });
+      // Import lazily and only when actually closing, so the common no-stale
+      // path never pulls in the webhook module (keeps it out of unit tests).
+      const { maybeOfferContactExchange } = await import("../webhooks/sms");
+      await maybeOfferContactExchange(user.phoneHash, match.matchedUserId, match.id!);
+      closed++;
+    } catch (err) {
+      functions.logger.error("Stale-debrief close error", err);
+    }
+  }
+  if (closed) functions.logger.info("Stale debriefs force-closed", { closed });
+  return { closed };
 }
 
 export interface ScheduledDatesSummary {
@@ -413,7 +458,7 @@ export async function runScheduledDates(force = false): Promise<ScheduledDatesSu
           getPhoneByHash(user.phoneHash),
           getPhoneByHash(match.matchedUserId),
         ]);
-        const msg = `15 minutes until your Cupid date (${formatSlotCT(new Date(startMs))}). Find somewhere quiet — link coming right on time 💘`;
+        const msg = `15 minutes until your video date (${formatSlotCT(new Date(startMs))}). Find somewhere quiet, I'll send the link right on time.`;
         await Promise.all([
           pA ? sendSms(pA, msg) : null,
           pB ? sendSms(pB, msg) : null,
