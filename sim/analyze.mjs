@@ -24,6 +24,12 @@ const simUsers=users.filter(u=>byHash[u.id]);
 // Funnel
 const funnel={arrived:personas.length,profileCreated:simUsers.length,onboarded:simUsers.filter(u=>u.onboardingComplete).length};
 let matched=0,accepted=0,scheduled=0,dated=0,feedbackGiven=0,noFit=0,exchanged=0,oracle=[],violations=0;
+// Terminal split + stalls. STALL = mid-lifecycle statuses that should NOT remain
+// at fold end (a non-zero count means pairs got stranded). statusCount is the
+// full per-status tally for the report.
+let contactDeclined=0;
+const statusCount={};
+const STALL=["user_accepted","scheduling","scheduled","video_sent","debriefing"];
 // Matcher self-consistency: re-score each proposed pair on the SAME stored
 // (extracted) profiles the matcher actually used. The matcher only proposes
 // pairs that pass its own hard filters, so this MUST be 0 — any nonzero is a
@@ -47,6 +53,8 @@ for(const u of simUsers){
     if(m.feedbackGiven||["debriefing","feedback_given"].includes(m.status))feedbackGiven++;
     if(m.status==="no_fit")noFit++;
     if(m.status==="contact_shared")exchanged++;
+    if(m.status==="contact_declined")contactDeclined++;
+    if(m.status)statusCount[m.status]=(statusCount[m.status]||0)+1;
     const other=byHash[m.matchedUserId];
     if(other){
       const gt=(p)=>({phoneHash:p.hash,demographics:{age:p.groundTruth.age,gender:p.groundTruth.gender,city:"st. louis"},preferences:{ageMin:p.groundTruth.ageMin,ageMax:p.groundTruth.ageMax,genderPreference:p.groundTruth.genderPreference,relationshipIntent:p.groundTruth.relationshipIntent,dealbreakers:p.groundTruth.dealbreakers},personality:{interests:p.groundTruth.interests,values:p.groundTruth.values,humorStyle:p.groundTruth.humorStyle,communicationStyle:p.groundTruth.communicationStyle,personalityTraits:p.groundTruth.smoker?["smoker"]:[],wantsKids:p.groundTruth.wantsKids}});
@@ -157,6 +165,8 @@ const pct=(x)=>x[1]?`${Math.round(100*x[0]/x[1])}% (${x[0]}/${x[1]})`:"n/a";
 const report=`# Wave ${WAVE} Report (${new Date().toISOString().slice(0,16)})
 ## Funnel
 arrived ${funnel.arrived} -> profiles ${funnel.profileCreated} -> onboarded ${funnel.onboarded} -> matched ${matched} -> accepted ${accepted} -> scheduled ${scheduled} -> dated ${dated} -> feedback ${feedbackGiven} -> exchanged ${exchanged} (no_fit ${noFit})
+terminal split: contact_shared ${exchanged} | no_fit ${noFit} | contact_declined ${contactDeclined}
+stalls (mid-lifecycle at fold end, should be 0): ${STALL.reduce((a,s)=>a+(statusCount[s]||0),0)} ${JSON.stringify(Object.fromEntries(STALL.map(s=>[s,statusCount[s]||0]).filter(([,n])=>n)))}
 ## Extraction accuracy (vs ground truth)
 age exact: ${pct(acc.age)} | intent: ${pct(acc.relationshipIntent)} | interests precision avg: ${acc.interests.length?Math.round(100*acc.interests.reduce((a,b)=>a+b,0)/acc.interests.length)+"%":"n/a"} | dealbreaker captured: ${pct(acc.dealbreakers)}
 ## Match quality

@@ -144,8 +144,12 @@ async function tick(ev){
       // wave-1 bug: rolling on every poll killed 46% of personas in the reply queue)
       events.push({t:vnow+30,type:"persona_turn",p}); return;
     }
-    // hazard rolls only when the persona is actually about to take a turn
-    if(!ev.first && rnd()<p.behavior.dropoutHazard){ p.state.dropped=true; return; }
+    // hazard rolls only when the persona is actually about to take a turn.
+    // SEEDED mode suppresses dropout: a pre-onboarded validation pool is treated
+    // as committed daters so both sides reliably complete the multi-turn debrief
+    // (a mid-debrief dropout strands the partner and blocks the contact-exchange
+    // path we are validating). Organic onboarding folds still exercise dropout.
+    if(!SEEDED && !ev.first && rnd()<p.behavior.dropoutHazard){ p.state.dropped=true; return; }
     // Roll the date outcome ONCE, the first time Cupid asks how a date went, and
     // store it on persona state so every debrief turn stays consistent. ~80% read
     // as not-a-fit (FIT_PROBABILITY default 0.2).
