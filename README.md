@@ -61,7 +61,7 @@ It is designed to feel less like an app and more like texting a perceptive frien
 cupid/
 ├── functions/
 │   └── src/
-│       ├── index.ts                # Cloud Function exports (15 functions)
+│       ├── index.ts                # Cloud Function exports (17 functions)
 │       ├── models/                 # UserProfile, MatchRecord, shared types
 │       ├── services/
 │       │   ├── claude.ts           # Claude calls + profile extraction/merge
