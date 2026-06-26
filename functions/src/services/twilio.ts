@@ -83,7 +83,7 @@ export async function sendSms(to: string, rawBody: string, opts: SendOptions = {
 
 // ─── Contact card (vCard via MMS) ─────────────────────────────────────────────
 
-const CONTACT_CARD_URL = "https://textcupid.app/cupid.vcf";
+const CONTACT_CARD_URL = "https://textcupid.co/cupid.vcf";
 
 /** Send Cupid's vCard so the user can save the number and share it onward. */
 export async function sendContactCard(to: string): Promise<string> {

@@ -20,7 +20,7 @@ beforeEach(() => {
 describe("scrubOutbound URLs", () => {
   test("allows our domains and daily.co rooms", () => {
     const body =
-      "Your date: https://textcupid.daily.co/room-abc and details at https://textcupid.app/faq";
+      "Your date: https://textcupid.daily.co/room-abc and details at https://textcupid.co/faq";
     expect(scrubOutbound(body).body).toBe(body);
   });
 

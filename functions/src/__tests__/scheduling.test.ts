@@ -53,7 +53,7 @@ describe("buildIcs", () => {
   it("produces a valid VCALENDAR with alarm and room URL", () => {
     const ics = buildIcs("m123", new Date("2026-06-12T00:00:00Z"), "https://textcupid.daily.co/x");
     expect(ics).toContain("BEGIN:VCALENDAR");
-    expect(ics).toContain("UID:cupid-m123@textcupid.app");
+    expect(ics).toContain("UID:cupid-m123@textcupid.co");
     expect(ics).toContain("DTSTART:20260612T000000Z");
     expect(ics).toContain("TRIGGER:-PT15M");
     expect(ics).toContain("textcupid.daily.co/x");

@@ -87,10 +87,10 @@ export function buildIcs(matchId: string, scheduledAt: Date, roomUrl?: string): 
   return [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//Cupid//textcupid.app//EN",
+    "PRODID:-//Cupid//textcupid.co//EN",
     "METHOD:PUBLISH",
     "BEGIN:VEVENT",
-    `UID:cupid-${matchId}@textcupid.app`,
+    `UID:cupid-${matchId}@textcupid.co`,
     `DTSTAMP:${stamp}`,
     `DTSTART:${dtStart}`,
     `DTEND:${dtEnd}`,
