@@ -285,6 +285,8 @@ export const demoAdmin = functions
 // ─── Admin moderation endpoint (review surface; private dashboard only) ───────
 
 const ADMIN_MOD_ALLOWED_ORIGINS = new Set([
+  "https://textcupid.co",
+  "https://www.textcupid.co",
   "https://textcupid.app",
   "https://heycupid.app",
   "https://cupid-dating-mvp.web.app",
@@ -441,6 +443,8 @@ export const adminModeration = functions
 // ─── Waitlist signup (website form) ──────────────────────────────────────────
 
 const WAITLIST_ALLOWED_ORIGINS = new Set([
+  "https://textcupid.co",
+  "https://www.textcupid.co",
   "https://textcupid.app",
   "https://heycupid.app",
   "https://cupid-dating-mvp.web.app",

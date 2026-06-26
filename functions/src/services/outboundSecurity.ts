@@ -7,6 +7,8 @@ import * as functions from "firebase-functions";
 // sendSms choke point, so it covers model output AND hardcoded strings.
 
 const ALLOWED_HOSTS = [
+  "textcupid.co",
+  "www.textcupid.co",
   "textcupid.app",
   "www.textcupid.app",
   "heycupid.app",

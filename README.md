@@ -1,8 +1,8 @@
 <div align="center">
 
-![Cupid](.github/banner.svg)
+![TextCupid](.github/banner.svg)
 
-# Cupid
+# TextCupid
 
 **The matchmaker that lives in your text messages.**
 
@@ -18,9 +18,9 @@ No swiping. No profiles. No endless feed. You text a number, have a real convers
 
 ---
 
-## What is Cupid?
+## What is TextCupid?
 
-Cupid is an **SMS-native, AI-first matchmaker**. Instead of optimizing photos and swiping through strangers, you just text. Claude runs the whole conversation, learns who you are and what you actually want through natural dialogue, and proposes matches when it has real confidence, not a shotgun of "people near you."
+TextCupid is an **SMS-native, AI-first matchmaker**. Instead of optimizing photos and swiping through strangers, you just text. Claude runs the whole conversation, learns who you are and what you actually want through natural dialogue, and proposes matches when it has real confidence, not a shotgun of "people near you."
 
 When two people are both interested, Cupid opens an **anonymous, time-limited video room** so they meet face to face before any names or numbers change hands. Contact details are only exchanged after both sides say yes.
 
