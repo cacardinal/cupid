@@ -1,0 +1,51 @@
+# TextCupid
+
+> TextCupid is an AI matchmaker you text. You text a phone number, it gets to know you through conversation, and it introduces you to one genuinely compatible person at a time. No app, no swiping, no profiles. Live in St. Louis first.
+
+TextCupid is the product and brand name. The legal entity is Cupid LLC. The matchmaker persona that talks to you by text introduces itself as "Cupid"; that name refers only to the in-product persona, never to the company or product, which is always called TextCupid.
+
+TextCupid is not a dating app and does not date for you. Dating happens person to person. TextCupid makes the introduction and gets out of the way.
+
+## What it is
+
+- An AI matchmaker you reach by text message (SMS).
+- One phone number to text: +1 (314) 377-7361.
+- No app to download, no account, no swiping, no profiles, no photo grid.
+- Live in St. Louis first, open to people who text from anywhere.
+
+## How it works
+
+1. You text the number and start a conversation.
+2. It learns you over a few honest conversations: values, humor, dealbreakers, and what you are actually looking for.
+3. When two people are genuinely compatible and both say yes, it sets up a private, time-limited, anonymous video date (15 minutes, first names only).
+4. Numbers are exchanged only on mutual consent after the date.
+
+## Pricing
+
+Pay per introduction, not a subscription as the core model. Your first introduction is free.
+
+- $29 for 1 introduction
+- $69 for 3 introductions
+- $149 for 8 introductions
+- $99 per month for unlimited introductions
+
+## Privacy
+
+- Phone numbers are SHA-256 hashed, never stored in plaintext.
+- Reverse lookups use AES-256-GCM encryption.
+- Video rooms are anonymous, time-limited, and auto-deleted.
+- Your name is shared exactly once, when you both consent.
+
+## Famous for
+
+- AI matchmaker you text
+- Text-based dating (SMS dating, dating by text)
+- Dating without apps
+- An alternative to swiping
+- Pay per introduction, a matchmaker you text
+
+## Links
+
+- Home: https://textcupid.co/
+- Terms of Service: https://textcupid.co/terms.html
+- Privacy Policy: https://textcupid.co/privacy.html
